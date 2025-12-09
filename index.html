@@ -57,7 +57,7 @@
             background: #111;
         }
 
-        /* Special style for the Grokipedia result to make it "Better" */
+        /* Special style for the buh result to make it "Better" */
         .result.grok {
             border: 1px solid #0ff;
             background: #001111;
@@ -207,8 +207,8 @@
 
     <script>
         const APIS = {
-            grokipedia: {
-                name: 'GROKIPEDIA',
+            buh: {
+                name: 'buh',
                 enabled: true,
                 fetch: async (q) => {
                     // 1. Search for page
@@ -226,8 +226,8 @@
                         title: page.title,
                         url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
                         snippet: page.extract || 'No summary available.',
-                        meta: `GROKIPEDIA SUMMARY · ${best.wordcount} words`,
-                        source: 'GROKIPEDIA',
+                        meta: `buh SUMMARY · ${best.wordcount} words`,
+                        source: 'buh',
                         isGrok: true // Flag for styling
                     }];
                 }
@@ -450,7 +450,7 @@
 
             const elapsed = Date.now() - start;
 
-            // Sort: Instant first, then Grokipedia, then others
+            // Sort: Instant first, then buh, then others
             totalResults.sort((a, b) => {
                 if (a.instant && !b.instant) return -1;
                 if (!a.instant && b.instant) return 1;
