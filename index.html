@@ -8,6 +8,12 @@
 <meta name="theme-color" content="#0f0f1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<!-- Reliable CDNs with correct application/javascript MIME types -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -51,7 +57,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);padding:1
 
 input[type="text"],textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:0.85rem;transition:all 0.2s}
 input[type="text"]:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(233,69,96,0.1)}
-textarea{resize:none;font-family:monospace;font-size:0.72rem}
+textarea{resize:none;font-family:monospace;font-size:0.72rem;word-break:break-all}
 
 .btn{padding:10px 14px;border:none;border-radius:8px;cursor:pointer;font-size:0.8rem;font-weight:600;transition:all 0.2s;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:5px}
 .btn-primary{background:linear-gradient(135deg,var(--primary),#c73652);color:white;box-shadow:0 4px 15px rgba(233,69,96,0.3)}
@@ -70,7 +76,7 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
 /* QR CODE */
 .qr-container{display:flex;flex-direction:column;align-items:center;gap:10px;padding:15px;background:var(--bg);border-radius:10px;margin-top:8px}
 .qr-code{background:#fff;padding:10px;border-radius:8px;display:flex;align-items:center;justify-content:center}
-.qr-code canvas{display:block}
+.qr-code canvas{display:block; border-radius: 4px;}
 .qr-label{font-size:0.7rem;color:var(--text-dim);text-align:center}
 
 /* CAMERA SCANNER */
@@ -287,8 +293,8 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
         </div>
         
         <div id="joinMode" style="display:none">
-          <div class="label">Paste offer or scan QR:</div>
-          <textarea id="remoteSignal" rows="3" placeholder="Paste signal JSON here..."></textarea>
+          <div class="label">Paste P2P-CONNECT format signal:</div>
+          <textarea id="remoteSignal" rows="3" placeholder="Paste proprietary signal here..."></textarea>
           <div class="btn-group">
             <button class="btn btn-success" onclick="processSignal()">✅ Process</button>
             <button class="btn btn-secondary" onclick="openScanner('signal')">📷 Scan</button>
@@ -298,7 +304,11 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
 
       <div class="card" id="offerCard" style="display:none">
         <h3>📤 Your Offer</h3>
-        <div class="qr-container" id="offerQR"></div>
+        <div class="qr-container">
+          <div class="qr-code">
+            <canvas id="offerQRCanvas"></canvas>
+          </div>
+        </div>
         <textarea id="myOffer" rows="3" readonly onclick="this.select()"></textarea>
         <div class="btn-group">
           <button class="btn btn-secondary btn-sm" onclick="copyText('myOffer')">📋 Copy</button>
@@ -311,7 +321,7 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
 
       <div class="card" id="answerInputCard" style="display:none">
         <h3>📥 Paste Answer</h3>
-        <textarea id="answerInput" rows="3" placeholder="Paste the answer from your peer..."></textarea>
+        <textarea id="answerInput" rows="3" placeholder="Paste the P2P-CONNECT answer from peer..."></textarea>
         <div class="btn-group">
           <button class="btn btn-success" onclick="processAnswer()">✅ Connect</button>
           <button class="btn btn-secondary" onclick="openScanner('answer')">📷 Scan</button>
@@ -320,7 +330,11 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
 
       <div class="card" id="answerCard" style="display:none">
         <h3>📤 Your Answer</h3>
-        <div class="qr-container" id="answerQR"></div>
+        <div class="qr-container">
+          <div class="qr-code">
+            <canvas id="answerQRCanvas"></canvas>
+          </div>
+        </div>
         <textarea id="myAnswer" rows="3" readonly onclick="this.select()"></textarea>
         <div class="btn-group">
           <button class="btn btn-secondary btn-sm" onclick="copyText('myAnswer')">📋 Copy</button>
@@ -413,7 +427,7 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
       <p>Serverless encrypted peer-to-peer chat & file sharing. No server stores your data.</p>
       <div class="welcome-features">
         <span>🔒 End-to-end encrypted</span>
-        <span>📱 QR code connect</span>
+        <span>📱 Proprietary QR Connect</span>
         <span>💾 Persistent ID</span>
         <span>📁 File transfer</span>
       </div>
@@ -467,7 +481,7 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
     <button class="modal-close" onclick="closeModal('qrModal')">✕</button>
     <h2 id="qrModalTitle">Your ID QR Code</h2>
     <div class="qr-container" style="background:var(--bg);margin:0 auto">
-      <div class="qr-code" id="modalQRCode"></div>
+      <div class="qr-code"><canvas id="modalQRCanvas"></canvas></div>
       <div class="qr-label" id="modalQRLabel"></div>
     </div>
     <div class="modal-actions" style="justify-content:center">
@@ -505,139 +519,28 @@ textarea{resize:none;font-family:monospace;font-size:0.72rem}
 
 <script>
 // ============================================================
-// QR CODE GENERATOR (Minimal Implementation)
+// PROPRIETARY PLATFORM PROTOCOL (Lock Format & Compress)
 // ============================================================
-const QRCode = (function() {
-  const EC_L=1,EC_M=0,EC_Q=3,EC_H=2;
-  const MODE_8BIT=4;
-  const PAD0=0xEC,PAD1=0x11;
-  
-  function createQR(data,ecl=EC_L) {
-    const ver = getMinVersion(data.length,ecl);
-    const modules = 17 + ver*4;
-    const mat = Array(modules).fill(null).map(()=>Array(modules).fill(null));
-    
-    // Simplified QR generation for demo - creates visual pattern
-    const bits = toBits(data);
-    let idx = 0;
-    
-    // Finder patterns
-    drawFinder(mat,0,0);
-    drawFinder(mat,modules-7,0);
-    drawFinder(mat,0,modules-7);
-    
-    // Timing patterns
-    for(let i=8;i<modules-8;i++){
-      mat[6][i] = mat[i][6] = i%2===0;
-    }
-    
-    // Data
-    let dir = -1, col = modules-1;
-    for(let i=0;i<bits.length && col>0;) {
-      if(col===6) col--;
-      for(let row=dir>0?0:modules-1; row>=0&&row<modules; row+=dir) {
-        for(let c=0;c<2&&i<bits.length;c++) {
-          const x = col-c;
-          if(mat[row][x]===null) {
-            mat[row][x] = bits[i++]==='1';
-          }
-        }
-      }
-      dir = -dir;
-      col -= 2;
-    }
-    
-    // Fill remaining
-    for(let r=0;r<modules;r++)
-      for(let c=0;c<modules;c++)
-        if(mat[r][c]===null) mat[r][c] = false;
-    
-    return mat;
-  }
-  
-  function drawFinder(mat,r,c) {
-    for(let i=0;i<7;i++)for(let j=0;j<7;j++){
-      const isBorder = i===0||i===6||j===0||j===6;
-      const isInner = i>=2&&i<=4&&j>=2&&j<=4;
-      mat[r+i][c+j] = isBorder||isInner;
-    }
-    // Separator
-    for(let i=-1;i<=7;i++){
-      if(r+i>=0&&r+i<mat.length) {
-        if(c-1>=0) mat[r+i][c-1] = mat[r+i][c-1]===null?false:mat[r+i][c-1];
-        if(c+7<mat.length) mat[r+i][c+7] = mat[r+i][c+7]===null?false:mat[r+i][c+7];
-      }
-      if(c+i>=0&&c+i<mat.length) {
-        if(r-1>=0) mat[r-1][c+i] = mat[r-1][c+i]===null?false:mat[r-1][c+i];
-        if(r+7<mat.length) mat[r+7][c+i] = mat[r+7][c+i]===null?false:mat[r+7][c+i];
-      }
-    }
-  }
-  
-  function toBits(str) {
-    let bits = '';
-    for(let i=0;i<str.length;i++) {
-      bits += str.charCodeAt(i).toString(2).padStart(8,'0');
-    }
-    return bits;
-  }
-  
-  function getMinVersion(len,ecl) {
-    // Simplified - return version based on length
-    if(len<20) return 2;
-    if(len<40) return 4;
-    if(len<80) return 6;
-    if(len<150) return 10;
-    if(len<300) return 15;
-    if(len<500) return 20;
-    return 25;
-  }
-  
-  function toCanvas(data,size=200) {
-    // For long data, create a simplified visual representation
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    // Use compression for signal data
-    let compressed = data;
-    if(data.length > 500) {
-      compressed = LZString.compressToBase64(data);
-    }
-    
-    const mat = createQR(compressed.slice(0,800)); // Limit for QR
-    const cellSize = Math.floor(size/mat.length);
-    canvas.width = canvas.height = cellSize * mat.length;
-    
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = '#000';
-    
-    for(let r=0;r<mat.length;r++) {
-      for(let c=0;c<mat[r].length;c++) {
-        if(mat[r][c]) {
-          ctx.fillRect(c*cellSize,r*cellSize,cellSize,cellSize);
-        }
-      }
-    }
-    
-    return canvas;
-  }
-  
-  return { toCanvas };
-})();
+const APP_PROTOCOL = "P2P-CONNECT-V1::";
 
-// LZ-String compression (minimal)
-const LZString = {
-  compressToBase64: function(input) {
-    if(!input) return '';
-    // Simple base64 for compatibility
-    try { return btoa(encodeURIComponent(input)); } catch { return input; }
-  },
-  decompressFromBase64: function(input) {
-    if(!input) return '';
-    try { return decodeURIComponent(atob(input)); } catch { return input; }
+function encodePlatformData(obj) {
+  const jsonStr = JSON.stringify(obj);
+  const compressed = LZString.compressToEncodedURIComponent(jsonStr);
+  return APP_PROTOCOL + compressed;
+}
+
+function decodePlatformData(str) {
+  str = str.trim();
+  if (!str.startsWith(APP_PROTOCOL)) {
+    throw new Error("UNSUPPORTED_FORMAT");
   }
-};
+  const payload = str.substring(APP_PROTOCOL.length);
+  const decompressed = LZString.decompressFromEncodedURIComponent(payload);
+  if (!decompressed) {
+    throw new Error("CORRUPTED_DATA");
+  }
+  return JSON.parse(decompressed);
+}
 
 // ============================================================
 // STORAGE
@@ -661,7 +564,7 @@ const ICE_SERVERS = {iceServers:[
   {urls:'stun:stun.cloudflare.com:3478'},
 ]};
 const CHUNK_SIZE = 64*1024;
-const EMOJIS = ['😀','😂','😍','🤔','😎','🥳','👍','❤️','🔥','⚡','🎉','💯','🚀','👀','💪','🙏','😭','🤣','😊','🥰','😏','🤝','👋','✅','❌','⭐','🎮','💻','📱','🌟'];
+const EMOJIS =['😀','😂','😍','🤔','😎','🥳','👍','❤️','🔥','⚡','🎉','💯','🚀','👀','💪','🙏','😭','🤣','😊','🥰','😏','🤝','👋','✅','❌','⭐','🎮','💻','📱','🌟'];
 
 // ============================================================
 // STATE
@@ -676,6 +579,7 @@ let sendQueue=[],isSending=false;
 let lastOffer=null,lastAnswer=null;
 let scannerStream=null,scannerMode='signal';
 let currentCamera='environment';
+let scanningFrame = null;
 let settings = Storage.get('settings') || {autoSave:true,saveHistory:true,sound:false,vibrate:false};
 
 // ============================================================
@@ -698,44 +602,34 @@ function genId() { return Math.random().toString(36).substr(2,8).toUpperCase(); 
 function getColor(id) { const c=['#e94560','#533483','#00d4aa','#ffd700','#ff6b6b','#4ecdc4','#45b7d1','#96ceb4'];let h=0;for(let x of(id||''))h=(h*31+x.charCodeAt(0))&0xffff;return c[h%c.length]; }
 
 // ============================================================
-// QR CODE FUNCTIONS
+// QR CODE GENERATION LOGIC
 // ============================================================
 function showMyQR() {
   document.getElementById('qrModalTitle').textContent = 'Your ID: ' + myId;
-  const container = document.getElementById('modalQRCode');
-  container.innerHTML = '';
-  const canvas = QRCode.toCanvas(myId, 200);
-  container.appendChild(canvas);
+  const encodedIdString = encodePlatformData({ type: 'id', id: myId });
+  
+  new QRious({
+    element: document.getElementById('modalQRCanvas'),
+    value: encodedIdString,
+    size: 200,
+    level: 'L'
+  });
+  
   document.getElementById('modalQRLabel').textContent = 'Share this QR with your peer';
   openModal('qrModal');
 }
 
-function showSignalQR(signal, container, label) {
-  container.innerHTML = '';
-  const data = typeof signal === 'string' ? signal : JSON.stringify(signal);
-  
-  // For long signals, show compressed version
-  if(data.length > 500) {
-    const compressed = LZString.compressToBase64(data);
-    const canvas = QRCode.toCanvas(compressed.slice(0,800), 180);
-    container.appendChild(canvas);
-    
-    const info = document.createElement('div');
-    info.className = 'qr-label';
-    info.textContent = label + ' (Use copy for full signal)';
-    container.appendChild(info);
-  } else {
-    const canvas = QRCode.toCanvas(data, 180);
-    container.appendChild(canvas);
-    const info = document.createElement('div');
-    info.className = 'qr-label';
-    info.textContent = label;
-    container.appendChild(info);
-  }
+function showSignalQR(dataStr, canvasId) {
+  new QRious({
+    element: document.getElementById(canvasId),
+    value: dataStr,
+    size: 220,
+    level: 'L'
+  });
 }
 
 // ============================================================
-// CAMERA SCANNER
+// CAMERA SCANNER WITH jsQR integration
 // ============================================================
 async function openScanner(mode) {
   scannerMode = mode;
@@ -749,6 +643,7 @@ async function openScanner(mode) {
     scannerStream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById('scannerVideo');
     video.srcObject = scannerStream;
+    video.setAttribute("playsinline", true);
     await video.play();
     document.getElementById('scannerStatus').textContent = 'Scanning... Point at QR code';
     startScanning();
@@ -759,6 +654,7 @@ async function openScanner(mode) {
 }
 
 function closeScanner() {
+  if(scanningFrame) cancelAnimationFrame(scanningFrame);
   if(scannerStream) {
     scannerStream.getTracks().forEach(t=>t.stop());
     scannerStream = null;
@@ -777,72 +673,64 @@ function startScanning() {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   
-  // Use BarcodeDetector if available
-  if('BarcodeDetector' in window) {
-    const detector = new BarcodeDetector({formats:['qr_code']});
-    
-    const scan = async () => {
-      if(!scannerStream) return;
-      try {
-        const barcodes = await detector.detect(video);
-        if(barcodes.length > 0) {
-          handleScannedData(barcodes[0].rawValue);
-          return;
-        }
-      } catch(e) {}
-      requestAnimationFrame(scan);
-    };
-    scan();
-  } else {
-    // Fallback: manual frame capture (limited QR support)
-    document.getElementById('scannerStatus').textContent = 'Scanning... (Limited support - try copy/paste)';
-    
-    const checkFrame = () => {
-      if(!scannerStream) return;
+  const scan = () => {
+    if(!scannerStream) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      ctx.drawImage(video,0,0);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       
-      // Simple pattern detection (won't decode, but shows activity)
-      setTimeout(checkFrame, 500);
-    };
-    checkFrame();
-  }
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "dontInvert",
+      });
+
+      if(code && code.data) {
+        handleScannedData(code.data);
+        return;
+      }
+    }
+    scanningFrame = requestAnimationFrame(scan);
+  };
+  scanningFrame = requestAnimationFrame(scan);
 }
 
 function handleScannedData(data) {
   closeScanner();
   
   try {
-    // Try to decompress if needed
-    let decoded = data;
-    try { decoded = LZString.decompressFromBase64(data) || data; } catch {}
-    
-    // Try to parse as JSON
-    let parsed;
-    try { parsed = JSON.parse(decoded); } catch { parsed = null; }
+    // Decode with our proprietary logic
+    const parsed = decodePlatformData(data);
     
     if(scannerMode === 'id') {
-      // Just scanned a peer ID
-      notify('Scanned ID: ' + data, 'success');
+      if(parsed.type === 'id') {
+        notify('Scanned ID: ' + parsed.id, 'success');
+      } else {
+        notify('Scanned QR does not contain an ID', 'error');
+      }
     } else if(scannerMode === 'signal' || scannerMode === 'answer') {
       if(parsed && (parsed.type === 'offer' || parsed.type === 'answer')) {
-        document.getElementById('remoteSignal').value = decoded;
+        // Feed the original encoded payload into the input
+        document.getElementById('remoteSignal').value = data;
+        
         if(scannerMode === 'answer') {
-          document.getElementById('answerInput').value = decoded;
+          document.getElementById('answerInput').value = data;
+          notify('Answer scanned! Processing...', 'success');
+          setTimeout(() => processAnswer(), 500);
+        } else {
+          notify('Offer scanned! Processing...', 'success');
+          setTimeout(() => processSignal(), 500);
         }
-        notify('Signal scanned! Processing...', 'success');
-        setTimeout(()=>{
-          if(scannerMode === 'answer') processAnswer();
-          else processSignal();
-        }, 500);
       } else {
-        document.getElementById('remoteSignal').value = decoded;
-        notify('QR scanned - check the data', 'info');
+        notify('QR scanned - but it is not a signal', 'warning');
       }
     }
   } catch(e) {
-    notify('Could not parse QR data', 'error');
+    if(e.message === "UNSUPPORTED_FORMAT") {
+      notify('Invalid QR. Must be generated by P2P Connect.', 'error');
+    } else {
+      notify('Could not parse QR data', 'error');
+    }
   }
 }
 
@@ -866,9 +754,9 @@ async function createOffer() {
     const signal = {type:'offer',sdp:pc.localDescription,id:myId};
     lastOffer = signal;
     
-    const signalStr = JSON.stringify(signal);
+    const signalStr = encodePlatformData(signal);
     document.getElementById('myOffer').value = signalStr;
-    showSignalQR(signalStr, document.getElementById('offerQR'), 'Scan with peer device');
+    showSignalQR(signalStr, 'offerQRCanvas');
     
     document.getElementById('offerCard').style.display = 'block';
     document.getElementById('answerInputCard').style.display = 'block';
@@ -886,7 +774,7 @@ async function processSignal() {
   if(!raw) {notify('Paste a signal first','warning');return;}
   
   try {
-    const signal = JSON.parse(raw);
+    const signal = decodePlatformData(raw);
     
     if(signal.type === 'offer') {
       peerId = signal.id || 'Unknown';
@@ -909,9 +797,9 @@ async function processSignal() {
       const answerSignal = {type:'answer',sdp:pc.localDescription,id:myId};
       lastAnswer = answerSignal;
       
-      const answerStr = JSON.stringify(answerSignal);
+      const answerStr = encodePlatformData(answerSignal);
       document.getElementById('myAnswer').value = answerStr;
-      showSignalQR(answerStr, document.getElementById('answerQR'), 'Send to offerer');
+      showSignalQR(answerStr, 'answerQRCanvas');
       
       document.getElementById('answerCard').style.display = 'block';
       notify('Answer created! Send it back','success');
@@ -929,7 +817,8 @@ async function processSignal() {
     
     document.getElementById('remoteSignal').value = '';
   } catch(e) {
-    notify('Invalid signal: '+e.message,'error');
+    if(e.message === "UNSUPPORTED_FORMAT") notify('Invalid Platform format', 'error');
+    else notify('Invalid signal: '+e.message,'error');
   }
 }
 
@@ -938,7 +827,7 @@ async function processAnswer() {
   if(!raw) {notify('Paste the answer first','warning');return;}
   
   try {
-    const signal = JSON.parse(raw);
+    const signal = decodePlatformData(raw);
     if(signal.type !== 'answer') {notify('This is not an answer','error');return;}
     
     peerId = signal.id || 'Unknown';
@@ -951,7 +840,8 @@ async function processAnswer() {
     document.getElementById('answerInput').value = '';
     notify('Connecting...','info');
   } catch(e) {
-    notify('Invalid answer: '+e.message,'error');
+    if(e.message === "UNSUPPORTED_FORMAT") notify('Invalid Platform format', 'error');
+    else notify('Invalid answer: '+e.message,'error');
   }
 }
 
@@ -1375,7 +1265,7 @@ function clearChat() {
   const typing = document.getElementById('typingIndicator');
   c.innerHTML = '';
   c.appendChild(typing);
-  messageHistory = [];
+  messageHistory =[];
   saveChatHistory();
   addSysMsg('🗑️ Chat cleared');
 }
@@ -1549,7 +1439,7 @@ function useSignal(i) {
   const peers = Storage.get('savedPeers')||[];
   const p = peers[i];
   if(p?.lastSignal) {
-    document.getElementById('remoteSignal').value = JSON.stringify(p.lastSignal);
+    document.getElementById('remoteSignal').value = encodePlatformData(p.lastSignal);
     switchTab('connect');
     setConnectMode('join');
     notify('Signal loaded!','info');
@@ -1567,7 +1457,7 @@ function checkQuickReconnect() {
 function quickReconnect() {
   const last = Storage.get('lastPeer');
   if(last?.signal) {
-    document.getElementById('remoteSignal').value = JSON.stringify(last.signal);
+    document.getElementById('remoteSignal').value = encodePlatformData(last.signal);
     setConnectMode('join');
     notify('Last signal loaded. Process it to reconnect.','warning');
   }
