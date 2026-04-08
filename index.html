@@ -252,7 +252,7 @@ textarea { resize: none; font-family: 'JetBrains Mono', monospace; font-size: 0.
 
 <div class="app">
   
-  <!-- NAV & TABS (Sidebar on desktop, App structure on mobile) -->
+  <!-- NAV & TABS -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-tabs">
       <button class="tab-btn active" onclick="switchTab('connect')">
@@ -483,11 +483,15 @@ textarea { resize: none; font-family: 'JetBrains Mono', monospace; font-size: 0.
 </div>
 
 <script>
+// ==========================================
+// Protocol & Data Handling
+// ==========================================
 const APP_PROTOCOL = "P2P-CONNECT-V1::";
 
 function encodePlatformData(obj) {
   return APP_PROTOCOL + LZString.compressToEncodedURIComponent(JSON.stringify(obj));
 }
+
 function decodePlatformData(str) {
   str = str.trim();
   if (!str.startsWith(APP_PROTOCOL)) throw new Error("UNSUPPORTED_FORMAT");
@@ -496,180 +500,381 @@ function decodePlatformData(str) {
 
 const Storage = {
   prefix: 'p2px_',
-  get(k,d=null) { try{const v=localStorage.getItem(this.prefix+k);return v?JSON.parse(v):d}catch{return d} },
-  set(k,v) { try{localStorage.setItem(this.prefix+k,JSON.stringify(v))}catch(e){} },
-  remove(k) { localStorage.removeItem(this.prefix+k) },
-  getAll() { const d={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(this.prefix))try{d[k.slice(this.prefix.length)]=JSON.parse(localStorage.getItem(k))}catch{}}return d },
-  getSize() { let t=0;for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(this.prefix))t+=localStorage.getItem(k).length*2}return t },
-  clear() { const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(this.prefix))keys.push(k)}keys.forEach(k=>localStorage.removeItem(k)) }
+  get(k, d=null) { 
+    try { const v=localStorage.getItem(this.prefix+k); return v ? JSON.parse(v) : d; } 
+    catch { return d; } 
+  },
+  set(k, v) { 
+    try { localStorage.setItem(this.prefix+k, JSON.stringify(v)); } 
+    catch(e){} 
+  },
+  remove(k) { localStorage.removeItem(this.prefix+k); },
+  getAll() { 
+    const d={}; 
+    for(let i=0; i<localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if(k.startsWith(this.prefix)) {
+        try { d[k.slice(this.prefix.length)] = JSON.parse(localStorage.getItem(k)); } catch{}
+      }
+    }
+    return d; 
+  },
+  getSize() { 
+    let t=0; 
+    for(let i=0; i<localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if(k.startsWith(this.prefix)) t += localStorage.getItem(k).length * 2;
+    }
+    return t; 
+  },
+  clear() { 
+    const keys=[]; 
+    for(let i=0; i<localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if(k.startsWith(this.prefix)) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k)); 
+  }
 };
 
+// ==========================================
+// App State
+// ==========================================
 const ICE_SERVERS = {iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
-const CHUNK_SIZE = 64*1024;
+const CHUNK_SIZE = 64 * 1024;
 
-let pc=null,dc=null;
+let pc = null;
+let dc = null;
 let myId = Storage.get('myId') || genId();
-let peerId='',peerName='',peerColor='#ec4899';
-let isConnected=false,isOfferer=false;
-let isTyping=false,typingTimer=null;
-let transfers={},receivingFiles={},messageHistory=[];
-let sendQueue=[],isSending=false;
-let lastOffer=null,lastAnswer=null;
-let scannerStream=null,scannerMode='signal',currentCamera='environment',scanningFrame=null;
-let settings = Storage.get('settings') || {autoSave:true,saveHistory:true,sound:true};
+let peerId = '';
+let peerName = '';
+let peerColor = '#ec4899';
+let isConnected = false;
+let isOfferer = false;
+let isTyping = false;
+let typingTimer = null;
+let transfers = {};
+let receivingFiles = {};
+let messageHistory = [];
+let sendQueue = [];
+let isSending = false;
+let lastOffer = null;
+let lastAnswer = null;
+let scannerStream = null;
+let scannerMode = 'signal';
+let currentCamera = 'environment';
+let scanningFrame = null;
+let settings = Storage.get('settings') || {autoSave: true, saveHistory: true, sound: true};
 
+// ==========================================
+// Initialization & Utilities
+// ==========================================
 function init() {
-  Storage.set('myId',myId);
+  Storage.set('myId', myId);
   document.getElementById('myIdBox').textContent = myId;
   loadSettings();
   loadSavedPeers();
   updateStorageInfo();
 }
 
-function genId() { return Math.random().toString(36).substr(2,8).toUpperCase(); }
-function getColor(id) { const c=['#ec4899','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4']; let h=0;for(let x of(id||''))h=(h*31+x.charCodeAt(0))&0xffff;return c[h%c.length]; }
+function genId() { 
+  return Math.random().toString(36).substr(2,8).toUpperCase(); 
+}
 
+function getColor(id) { 
+  const c = ['#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4']; 
+  let h = 0;
+  for(let x of (id||'')) h = (h * 31 + x.charCodeAt(0)) & 0xffff;
+  return c[h % c.length]; 
+}
+
+// ** Fixed setStatus Function **
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  if (dot) dot.className = 'status-dot ' + (state || '');
+  if (txt) txt.textContent = text;
+}
+
+// ==========================================
+// QR & Scanning
+// ==========================================
 function showMyQR() {
-  document.getElementById('modalQRCanvas').getContext('2d').clearRect(0,0,200,200);
-  new QRious({element: document.getElementById('modalQRCanvas'), value: encodePlatformData({type:'id',id:myId}), size: 200, level: 'L'});
+  const canvas = document.getElementById('modalQRCanvas');
+  canvas.getContext('2d').clearRect(0, 0, 200, 200);
+  
+  new QRious({
+    element: canvas, 
+    value: encodePlatformData({type: 'id', id: myId}), 
+    size: 200, 
+    level: 'L'
+  });
+  
   openModal('qrModal');
 }
+
 function showSignalQR(dataStr, canvasId) {
-  new QRious({element: document.getElementById(canvasId), value: dataStr, size: 220, level: 'L'});
+  new QRious({
+    element: document.getElementById(canvasId), 
+    value: dataStr, 
+    size: 220, 
+    level: 'L'
+  });
 }
 
 async function openScanner(mode) {
-  scannerMode = mode; openModal('scannerModal');
+  scannerMode = mode; 
+  openModal('scannerModal');
   document.getElementById('scannerStatus').textContent = 'Starting camera...';
+  
   try {
-    scannerStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:currentCamera,width:{ideal:640}}});
+    scannerStream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: currentCamera, width: { ideal: 640 } } 
+    });
     const video = document.getElementById('scannerVideo');
-    video.srcObject = scannerStream; await video.play();
+    video.srcObject = scannerStream; 
+    await video.play();
     document.getElementById('scannerStatus').textContent = 'Point at QR code';
     startScanning();
-  } catch(e) { document.getElementById('scannerStatus').textContent = 'Camera error'; }
+  } catch(e) { 
+    document.getElementById('scannerStatus').textContent = 'Camera error'; 
+  }
 }
 
 function closeScanner() {
-  if(scanningFrame) cancelAnimationFrame(scanningFrame);
-  if(scannerStream) { scannerStream.getTracks().forEach(t=>t.stop()); scannerStream=null; }
+  if (scanningFrame) cancelAnimationFrame(scanningFrame);
+  if (scannerStream) { 
+    scannerStream.getTracks().forEach(t => t.stop()); 
+    scannerStream = null; 
+  }
   closeModal('scannerModal');
 }
-async function switchCamera() { currentCamera=currentCamera==='environment'?'user':'environment'; closeScanner(); setTimeout(()=>openScanner(scannerMode),300); }
+
+async function switchCamera() { 
+  currentCamera = currentCamera === 'environment' ? 'user' : 'environment'; 
+  closeScanner(); 
+  setTimeout(() => openScanner(scannerMode), 300); 
+}
 
 function startScanning() {
-  const video=document.getElementById('scannerVideo'), canvas=document.createElement('canvas'), ctx=canvas.getContext('2d');
+  const video = document.getElementById('scannerVideo');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
   const scan = () => {
-    if(!scannerStream) return;
-    if(video.readyState===video.HAVE_ENOUGH_DATA) {
-      canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-      ctx.drawImage(video,0,0,canvas.width,canvas.height);
-      const code = jsQR(ctx.getImageData(0,0,canvas.width,canvas.height).data,canvas.width,canvas.height,{inversionAttempts:"dontInvert"});
-      if(code&&code.data) return handleScannedData(code.data);
+    if (!scannerStream) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth; 
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const code = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, {
+        inversionAttempts: "dontInvert"
+      });
+      if (code && code.data) return handleScannedData(code.data);
     }
-    scanningFrame=requestAnimationFrame(scan);
+    scanningFrame = requestAnimationFrame(scan);
   };
-  scanningFrame=requestAnimationFrame(scan);
+  scanningFrame = requestAnimationFrame(scan);
 }
 
 function handleScannedData(data) {
   closeScanner();
   try {
     const parsed = decodePlatformData(data);
-    if(scannerMode==='id'&&parsed.type==='id') notify('Scanned ID: '+parsed.id,'success');
-    else if(scannerMode==='signal'||scannerMode==='answer') {
+    if (scannerMode === 'id' && parsed.type === 'id') {
+      notify('Scanned ID: ' + parsed.id, 'success');
+    } else if (scannerMode === 'signal' || scannerMode === 'answer') {
       document.getElementById('remoteSignal').value = data;
-      if(scannerMode==='answer') { document.getElementById('answerInput').value=data; setTimeout(processAnswer,300); }
-      else { setTimeout(processSignal,300); }
+      if (scannerMode === 'answer') { 
+        document.getElementById('answerInput').value = data; 
+        setTimeout(processAnswer, 300); 
+      } else { 
+        setTimeout(processSignal, 300); 
+      }
     }
-  } catch(e) { notify('Invalid QR Code','error'); }
+  } catch(e) { 
+    notify('Invalid QR Code format', 'error'); 
+  }
 }
 
+// ==========================================
+// WebRTC Connections
+// ==========================================
 async function createOffer() {
   try {
-    cleanup(); pc=new RTCPeerConnection(ICE_SERVERS); setupPC();
-    dc=pc.createDataChannel('p2p',{ordered:true}); setupDC(dc); isOfferer=true;
-    setStatus('connecting','Creating offer...');
-    await pc.setLocalDescription(await pc.createOffer()); await gatherICE();
-    lastOffer = {type:'offer',sdp:pc.localDescription,id:myId};
+    cleanup(); 
+    pc = new RTCPeerConnection(ICE_SERVERS); 
+    setupPC();
+    
+    dc = pc.createDataChannel('p2p', { ordered: true }); 
+    setupDC(dc); 
+    isOfferer = true;
+    
+    setStatus('connecting', 'Creating offer...');
+    await pc.setLocalDescription(await pc.createOffer()); 
+    await gatherICE();
+    
+    lastOffer = { type: 'offer', sdp: pc.localDescription, id: myId };
     const str = encodePlatformData(lastOffer);
-    document.getElementById('myOffer').value = str; showSignalQR(str, 'offerQRCanvas');
-    document.getElementById('offerCard').style.display = 'block'; document.getElementById('answerInputCard').style.display = 'block'; document.getElementById('offerBtn').disabled = true;
-    notify('Invite ready!','success');
-  } catch(e) { notify('Error: '+e.message,'error'); setStatus('','Offline'); }
+    
+    document.getElementById('myOffer').value = str; 
+    showSignalQR(str, 'offerQRCanvas');
+    
+    document.getElementById('offerCard').style.display = 'block'; 
+    document.getElementById('answerInputCard').style.display = 'block'; 
+    document.getElementById('offerBtn').disabled = true;
+    
+    notify('Invite ready!', 'success');
+  } catch(e) { 
+    notify('Error: ' + e.message, 'error'); 
+    setStatus('', 'Offline'); 
+  }
 }
 
 async function processSignal() {
-  const raw = document.getElementById('remoteSignal').value.trim(); if(!raw)return;
+  const raw = document.getElementById('remoteSignal').value.trim(); 
+  if (!raw) return;
+  
   try {
     const sig = decodePlatformData(raw);
-    if(sig.type==='offer') {
-      peerId=sig.id||'Peer'; peerName=sig.id||'Peer'; peerColor=getColor(peerName);
-      cleanup(); pc=new RTCPeerConnection(ICE_SERVERS); setupPC(); isOfferer=false;
-      pc.ondatachannel = e => {dc=e.channel;setupDC(dc);};
-      setStatus('connecting','Connecting...');
+    
+    if (sig.type === 'offer') {
+      peerId = sig.id || 'Peer'; 
+      peerName = sig.id || 'Peer'; 
+      peerColor = getColor(peerName);
+      
+      cleanup(); 
+      pc = new RTCPeerConnection(ICE_SERVERS); 
+      setupPC(); 
+      isOfferer = false;
+      
+      pc.ondatachannel = e => { dc = e.channel; setupDC(dc); };
+      setStatus('connecting', 'Connecting...');
+      
       await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
-      await pc.setLocalDescription(await pc.createAnswer()); await gatherICE();
-      lastAnswer = {type:'answer',sdp:pc.localDescription,id:myId};
+      await pc.setLocalDescription(await pc.createAnswer()); 
+      await gatherICE();
+      
+      lastAnswer = { type: 'answer', sdp: pc.localDescription, id: myId };
       const str = encodePlatformData(lastAnswer);
-      document.getElementById('myAnswer').value = str; showSignalQR(str, 'answerQRCanvas');
-      document.getElementById('answerCard').style.display = 'block'; notify('Response generated!','success');
-    } else if(sig.type==='answer') {
-      peerId=sig.id||'Peer'; peerName=sig.id||'Peer'; peerColor=getColor(peerName);
-      await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp)); notify('Connecting...','success');
+      
+      document.getElementById('myAnswer').value = str; 
+      showSignalQR(str, 'answerQRCanvas');
+      document.getElementById('answerCard').style.display = 'block'; 
+      
+      notify('Response generated!', 'success');
+      
+    } else if (sig.type === 'answer') {
+      peerId = sig.id || 'Peer'; 
+      peerName = sig.id || 'Peer'; 
+      peerColor = getColor(peerName);
+      
+      await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp)); 
+      notify('Connecting...', 'success');
     }
-    document.getElementById('remoteSignal').value='';
-  } catch(e) { notify('Invalid signal','error'); }
+    
+    document.getElementById('remoteSignal').value = '';
+  } catch(e) { 
+    notify('Invalid connection signal', 'error'); 
+  }
 }
 
 async function processAnswer() {
-  const raw=document.getElementById('answerInput').value.trim(); if(!raw)return;
+  const raw = document.getElementById('answerInput').value.trim(); 
+  if (!raw) return;
+  
   try {
-    const sig=decodePlatformData(raw); if(sig.type!=='answer') throw new Error();
-    peerId=sig.id||'Peer'; peerName=sig.id||'Peer'; peerColor=getColor(peerName);
-    await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp)); document.getElementById('answerInput').value=''; notify('Connecting...','success');
-  } catch(e) { notify('Invalid answer','error'); }
+    const sig = decodePlatformData(raw); 
+    if (sig.type !== 'answer') throw new Error();
+    
+    peerId = sig.id || 'Peer'; 
+    peerName = sig.id || 'Peer'; 
+    peerColor = getColor(peerName);
+    
+    await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp)); 
+    document.getElementById('answerInput').value = ''; 
+    notify('Connecting...', 'success');
+  } catch(e) { 
+    notify('Invalid answer signal', 'error'); 
+  }
 }
 
-function setupPC() { pc.onconnectionstatechange = () => { const s=pc.connectionState; if(s==='connected') onConnected(); else if(['disconnected','failed','closed'].includes(s)) onDisconnected(); }; }
+function setupPC() { 
+  pc.onconnectionstatechange = () => { 
+    const s = pc.connectionState; 
+    if (s === 'connected') onConnected(); 
+    else if (['disconnected', 'failed', 'closed'].includes(s)) onDisconnected(); 
+  }; 
+}
+
 function setupDC(c) {
-  c.binaryType='arraybuffer';
-  c.onopen=()=>{onConnected();sendCtrl({type:'hello',id:myId,name:myId});};
-  c.onclose=()=>onDisconnected();
-  c.onmessage=e=>{ typeof e.data==='string'?handleText(e.data):handleBinary(e.data); };
+  c.binaryType = 'arraybuffer';
+  c.onopen = () => { onConnected(); sendCtrl({ type: 'hello', id: myId, name: myId }); };
+  c.onclose = () => onDisconnected();
+  c.onmessage = e => { typeof e.data === 'string' ? handleText(e.data) : handleBinary(e.data); };
 }
-async function gatherICE() { return new Promise(r=>{ if(pc.iceGatheringState==='complete')r(); pc.onicegatheringstatechange=()=>{if(pc.iceGatheringState==='complete')r();}; setTimeout(r,3000); }); }
-function cleanup() { if(dc)try{dc.close()}catch{} dc=null; if(pc)try{pc.close()}catch{} pc=null; }
-function disconnect() { if(confirm('End secure session?')) {cleanup();onDisconnected();} }
 
-// Routing logic for the native app feel
+async function gatherICE() { 
+  return new Promise(r => { 
+    if (pc.iceGatheringState === 'complete') r(); 
+    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') r(); }; 
+    setTimeout(r, 3000); 
+  }); 
+}
+
+function cleanup() { 
+  if (dc) try { dc.close(); } catch{} dc = null; 
+  if (pc) try { pc.close(); } catch{} pc = null; 
+}
+
+function disconnect() { 
+  if (confirm('End secure session?')) { cleanup(); onDisconnected(); } 
+}
+
+// ==========================================
+// UI State Switching
+// ==========================================
 function showChat() { document.body.classList.add('in-chat'); }
 function hideChat() { document.body.classList.remove('in-chat'); }
 
 function onConnected() {
-  if(isConnected) return; isConnected=true;
-  setStatus('connected','Connected to '+peerName);
-  document.getElementById('sendFileBtn').disabled=false; document.getElementById('sendBtn').disabled=false;
+  if (isConnected) return; 
+  isConnected = true;
   
-  document.getElementById('welcomeScreen').style.display='none';
-  document.getElementById('chatInterface').style.display='flex';
+  setStatus('connected', 'Connected to ' + peerName);
+  document.getElementById('sendFileBtn').disabled = false; 
+  document.getElementById('sendBtn').disabled = false;
   
-  document.getElementById('chatPeerAvatar').textContent=peerName[0];
-  document.getElementById('chatPeerAvatar').style.background=`linear-gradient(135deg,${peerColor},#333)`;
-  document.getElementById('chatPeerName').textContent=peerName;
+  document.getElementById('welcomeScreen').style.display = 'none';
+  document.getElementById('chatInterface').style.display = 'flex';
   
-  loadChatForPeer(peerId); addSysMsg('Secure connection established.');
-  updateConnectedPeer(); showChat();
-  if(settings.autoSave) setTimeout(savePeer,500);
+  document.getElementById('chatPeerAvatar').textContent = peerName[0];
+  document.getElementById('chatPeerAvatar').style.background = `linear-gradient(135deg, ${peerColor}, #333)`;
+  document.getElementById('chatPeerName').textContent = peerName;
+  
+  loadChatForPeer(peerId); 
+  addSysMsg('Secure connection established.');
+  updateConnectedPeer(); 
+  showChat();
+  
+  if (settings.autoSave) setTimeout(savePeer, 500);
 }
 
 function onDisconnected() {
-  if(!isConnected) return; isConnected=false; saveChatHistory();
-  setStatus('','Offline'); hideChat();
-  document.getElementById('sendFileBtn').disabled=true; document.getElementById('sendBtn').disabled=true;
+  if (!isConnected) return; 
+  isConnected = false; 
+  saveChatHistory();
+  
+  setStatus('', 'Offline'); 
+  hideChat();
+  
+  document.getElementById('sendFileBtn').disabled = true; 
+  document.getElementById('sendBtn').disabled = true;
   addSysMsg('Connection closed.');
-  document.getElementById('connectedPeer').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.85rem;">No active connection</div>';
-  cleanup(); loadSavedPeers();
+  
+  document.getElementById('connectedPeer').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.85rem;">No active connection</div>';
+  cleanup(); 
+  loadSavedPeers();
 }
 
 function updateConnectedPeer() {
@@ -685,147 +890,407 @@ function updateConnectedPeer() {
   `;
 }
 
+// ==========================================
+// Messaging & Files
+// ==========================================
 function handleText(raw) {
   try {
-    const msg=JSON.parse(raw);
-    if(msg.type==='hello') { peerId=msg.id||peerId; peerName=msg.name||peerId; peerColor=getColor(peerName); updateConnectedPeer(); document.getElementById('chatPeerName').textContent=peerName; document.getElementById('chatPeerAvatar').textContent=peerName[0]; document.getElementById('chatPeerAvatar').style.background=peerColor; }
-    else if(msg.type==='chat') { addMsg(msg.text,'received',msg.ts); if(settings.sound) playSound(); }
-    else if(msg.type==='file-meta') { receivingFiles[msg.id]={meta:msg,chunks:[],received:0}; addFileMsg(msg,'received'); addTransfer(msg.id,msg.name,msg.size,'receiving',0); }
-    else if(msg.type==='file-done') finalizeFile(msg.id);
+    const msg = JSON.parse(raw);
+    if (msg.type === 'hello') { 
+      peerId = msg.id || peerId; 
+      peerName = msg.name || peerId; 
+      peerColor = getColor(peerName); 
+      updateConnectedPeer(); 
+      document.getElementById('chatPeerName').textContent = peerName; 
+      document.getElementById('chatPeerAvatar').textContent = peerName[0]; 
+      document.getElementById('chatPeerAvatar').style.background = peerColor; 
+    }
+    else if (msg.type === 'chat') { 
+      addMsg(msg.text, 'received', msg.ts); 
+      if (settings.sound) playSound(); 
+    }
+    else if (msg.type === 'file-meta') { 
+      receivingFiles[msg.id] = { meta: msg, chunks: [], received: 0 }; 
+      addFileMsg(msg, 'received'); 
+      addTransfer(msg.id, msg.name, msg.size, 'receiving', 0); 
+    }
+    else if (msg.type === 'file-done') {
+      finalizeFile(msg.id);
+    }
   } catch(e){}
 }
+
 function handleBinary(buf) {
-  const id=new TextDecoder().decode(new Uint8Array(buf,0,36)).replace(/\0/g,'');
-  const rf=receivingFiles[id]; if(rf) { rf.chunks.push(buf.slice(36)); rf.received+=buf.byteLength-36; updateTransfer(id,rf.received/rf.meta.size); }
+  const id = new TextDecoder().decode(new Uint8Array(buf, 0, 36)).replace(/\0/g, '');
+  const rf = receivingFiles[id]; 
+  if (rf) { 
+    rf.chunks.push(buf.slice(36)); 
+    rf.received += buf.byteLength - 36; 
+    updateTransfer(id, rf.received / rf.meta.size); 
+  }
 }
 
-function sendCtrl(obj) { if(dc&&dc.readyState==='open')dc.send(JSON.stringify(obj)); }
+function sendCtrl(obj) { 
+  if (dc && dc.readyState === 'open') dc.send(JSON.stringify(obj)); 
+}
+
 function sendMessage() {
-  const i=document.getElementById('messageInput'), txt=i.value.trim(); if(!txt||!dc)return;
-  const ts=Date.now(); sendCtrl({type:'chat',text:txt,ts}); addMsg(txt,'sent',ts); i.value=''; i.style.height='auto'; saveChatHistory();
+  const i = document.getElementById('messageInput');
+  const txt = i.value.trim(); 
+  if (!txt || !dc) return;
+  
+  const ts = Date.now(); 
+  sendCtrl({ type: 'chat', text: txt, ts }); 
+  addMsg(txt, 'sent', ts); 
+  
+  i.value = ''; 
+  i.style.height = 'auto'; 
+  saveChatHistory();
 }
-function handleMsgKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
-function handleTyping() { const i=document.getElementById('messageInput'); i.style.height='auto'; i.style.height=Math.min(i.scrollHeight,120)+'px'; }
 
-function playSound() { try{const c=new (window.AudioContext||window.webkitAudioContext)();const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=600;g.gain.value=0.05;o.start();o.stop(c.currentTime+0.1);}catch{} }
+function handleMsgKey(e) { 
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } 
+}
+
+function handleTyping() { 
+  const i = document.getElementById('messageInput'); 
+  i.style.height = 'auto'; 
+  i.style.height = Math.min(i.scrollHeight, 120) + 'px'; 
+}
+
+function playSound() { 
+  try {
+    const c = new (window.AudioContext || window.webkitAudioContext)();
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.connect(g);
+    g.connect(c.destination);
+    o.frequency.value = 600;
+    g.gain.value = 0.05;
+    o.start();
+    o.stop(c.currentTime + 0.1);
+  } catch{} 
+}
 
 function sendFile(f) {
-  if(!f||!isConnected)return; const id=genId()+genId(), meta={type:'file-meta',id,name:f.name,size:f.size,mime:f.type};
-  sendCtrl(meta); addFileMsg(meta,'sent'); addTransfer(id,f.name,f.size,'sending',0);
-  sendQueue.push({id,f,meta}); if(!isSending) processSendQueue();
+  if (!f || !isConnected) return; 
+  
+  const id = genId() + genId();
+  const meta = { type: 'file-meta', id, name: f.name, size: f.size, mime: f.type };
+  
+  sendCtrl(meta); 
+  addFileMsg(meta, 'sent'); 
+  addTransfer(id, f.name, f.size, 'sending', 0);
+  
+  sendQueue.push({ id, f, meta }); 
+  if (!isSending) processSendQueue();
 }
+
 async function processSendQueue() {
-  if(!sendQueue.length){isSending=false;return;} isSending=true;
-  const {id,f} = sendQueue.shift(), r=new FileReader(), idBuf=new Uint8Array(36); idBuf.set(new TextEncoder().encode(id));
-  let off=0;
-  const send = () => { if(off>=f.size){sendCtrl({type:'file-done',id});updateTransfer(id,1,'done');return processSendQueue();} r.readAsArrayBuffer(f.slice(off,off+CHUNK_SIZE)); };
-  r.onload=e=>{ if(dc){ const c=e.target.result, arr=new Uint8Array(36+c.byteLength); arr.set(idBuf,0); arr.set(new Uint8Array(c),36); dc.send(arr.buffer); off+=c.byteLength; updateTransfer(id,off/f.size); send(); } };
+  if (!sendQueue.length) { isSending = false; return; } 
+  isSending = true;
+  
+  const { id, f } = sendQueue.shift();
+  const r = new FileReader();
+  const idBuf = new Uint8Array(36); 
+  
+  idBuf.set(new TextEncoder().encode(id));
+  let off = 0;
+  
+  const send = () => { 
+    if (off >= f.size) {
+      sendCtrl({ type: 'file-done', id });
+      updateTransfer(id, 1, 'done');
+      return processSendQueue();
+    } 
+    r.readAsArrayBuffer(f.slice(off, off + CHUNK_SIZE)); 
+  };
+  
+  r.onload = e => { 
+    if (dc) { 
+      const c = e.target.result;
+      const arr = new Uint8Array(36 + c.byteLength); 
+      arr.set(idBuf, 0); 
+      arr.set(new Uint8Array(c), 36); 
+      
+      dc.send(arr.buffer); 
+      off += c.byteLength; 
+      updateTransfer(id, off / f.size); 
+      send(); 
+    } 
+  };
   send();
 }
+
 function finalizeFile(id) {
-  const rf=receivingFiles[id]; if(!rf)return;
-  const url=URL.createObjectURL(new Blob(rf.chunks,{type:rf.meta.mime}));
-  updateTransfer(id,1,'done',url,rf.meta.name); updateFileMsg(id,url); delete receivingFiles[id];
+  const rf = receivingFiles[id]; 
+  if (!rf) return;
+  const url = URL.createObjectURL(new Blob(rf.chunks, { type: rf.meta.mime }));
+  updateTransfer(id, 1, 'done', url, rf.meta.name); 
+  updateFileMsg(id, url); 
+  delete receivingFiles[id];
 }
 
-function addMsg(txt,type,ts,save=true) {
-  const c=document.getElementById('messages'), d=document.createElement('div'), t=new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  d.className='message '+type; d.innerHTML=`<div class="msg-bubble">${esc(txt).replace(/\n/g,'<br>')}</div><div class="msg-meta">${t}</div>`;
-  c.appendChild(d); c.scrollTop=c.scrollHeight; if(save) messageHistory.push({text:txt,type,ts});
+// ==========================================
+// UI Elements & Helpers
+// ==========================================
+function addMsg(txt, type, ts, save=true) {
+  const c = document.getElementById('messages');
+  const d = document.createElement('div');
+  const t = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  d.className = 'message ' + type; 
+  d.innerHTML = `<div class="msg-bubble">${esc(txt).replace(/\n/g, '<br>')}</div><div class="msg-meta">${t}</div>`;
+  c.appendChild(d); 
+  c.scrollTop = c.scrollHeight; 
+  
+  if (save) messageHistory.push({ text: txt, type, ts });
 }
-function addSysMsg(txt,save=true) {
-  const c=document.getElementById('messages'), d=document.createElement('div'); d.className='message system'; d.innerHTML=`<div class="msg-bubble">${txt}</div>`;
-  c.appendChild(d); c.scrollTop=c.scrollHeight; if(save) messageHistory.push({text:txt,type:'system',ts:Date.now()});
-}
-function addFileMsg(m,dir) {
-  const c=document.getElementById('messages'), d=document.createElement('div'); d.className='message '+dir; d.id='fm-'+m.id;
-  d.innerHTML=`<div class="msg-file"><div class="msg-file-icon">📁</div><div><div class="msg-file-name">${esc(m.name)}</div><div class="msg-file-size" id="fa-${m.id}">${dir==='sent'?'Uploading...':'Downloading...'}</div></div></div>`;
-  c.appendChild(d); c.scrollTop=c.scrollHeight;
-}
-function updateFileMsg(id,url) { const e=document.getElementById('fa-'+id); if(e) e.innerHTML=`<a href="${url}" download style="color:var(--success)">⬇️ Save File</a>`; }
 
-function addTransfer(id,n,s,dir,p) {
-  const l=document.getElementById('transfersList'); if(l.innerHTML.includes('No active')) l.innerHTML='';
-  l.innerHTML+=`<div style="background:var(--surface2);padding:12px;border-radius:12px;" id="t-${id}"><div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:6px"><span>${esc(n)}</span><span id="ts-${id}">0%</span></div><div class="progress-bar"><div class="progress-fill ${dir}" id="tp-${id}" style="width:0%"></div></div></div>`;
+function addSysMsg(txt, save=true) {
+  const c = document.getElementById('messages');
+  const d = document.createElement('div'); 
+  
+  d.className = 'message system'; 
+  d.innerHTML = `<div class="msg-bubble">${txt}</div>`;
+  c.appendChild(d); 
+  c.scrollTop = c.scrollHeight; 
+  
+  if (save) messageHistory.push({ text: txt, type: 'system', ts: Date.now() });
 }
-function updateTransfer(id,p,stat,url,n) {
-  const bar=document.getElementById('tp-'+id), lbl=document.getElementById('ts-'+id);
-  if(bar) bar.style.width=(p*100)+'%';
-  if(stat==='done'&&lbl) lbl.innerHTML=url?`<a href="${url}" download="${n}" style="color:var(--success)">Save</a>`:'Done';
-  else if(lbl) lbl.textContent=Math.round(p*100)+'%';
+
+function addFileMsg(m, dir) {
+  const c = document.getElementById('messages');
+  const d = document.createElement('div'); 
+  
+  d.className = 'message ' + dir; 
+  d.id = 'fm-' + m.id;
+  d.innerHTML = `<div class="msg-file"><div class="msg-file-icon">📁</div><div><div class="msg-file-name">${esc(m.name)}</div><div class="msg-file-size" id="fa-${m.id}">${dir === 'sent' ? 'Uploading...' : 'Downloading...'}</div></div></div>`;
+  c.appendChild(d); 
+  c.scrollTop = c.scrollHeight;
+}
+
+function updateFileMsg(id, url) { 
+  const e = document.getElementById('fa-' + id); 
+  if (e) e.innerHTML = `<a href="${url}" download style="color:var(--success)">⬇️ Save File</a>`; 
+}
+
+function addTransfer(id, n, s, dir, p) {
+  const l = document.getElementById('transfersList'); 
+  if (l.innerHTML.includes('No active')) l.innerHTML = '';
+  l.innerHTML += `<div style="background:var(--surface2);padding:12px;border-radius:12px;" id="t-${id}"><div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:6px"><span>${esc(n)}</span><span id="ts-${id}">0%</span></div><div class="progress-bar"><div class="progress-fill ${dir}" id="tp-${id}" style="width:0%"></div></div></div>`;
+}
+
+function updateTransfer(id, p, stat, url, n) {
+  const bar = document.getElementById('tp-' + id);
+  const lbl = document.getElementById('ts-' + id);
+  
+  if (bar) bar.style.width = (p * 100) + '%';
+  if (stat === 'done' && lbl) {
+    lbl.innerHTML = url ? `<a href="${url}" download="${n}" style="color:var(--success)">Save</a>` : 'Done';
+  } else if (lbl) {
+    lbl.textContent = Math.round(p * 100) + '%';
+  }
 }
 
 function switchTab(t) {
-  document.querySelectorAll('.tab-panel, .tab-btn').forEach(e=>e.classList.remove('active'));
-  document.getElementById('tab-'+t).classList.add('active');
-  const m={connect:0,peers:1,files:2,settings:3};
+  document.querySelectorAll('.tab-panel, .tab-btn').forEach(e => e.classList.remove('active'));
+  document.getElementById('tab-' + t).classList.add('active');
+  
+  const m = { connect: 0, peers: 1, files: 2, settings: 3 };
   document.querySelectorAll('.tab-btn')[m[t]].classList.add('active');
-  if(t==='settings') updateStorageInfo();
+  
+  if (t === 'settings') updateStorageInfo();
 }
+
 function setConnectMode(m) {
-  document.querySelectorAll('.qr-tab').forEach(e=>e.classList.remove('active'));
-  document.querySelectorAll('.qr-tab')[m==='create'?0:1].classList.add('active');
-  document.getElementById('createMode').style.display=m==='create'?'block':'none';
-  document.getElementById('joinMode').style.display=m==='join'?'block':'none';
+  document.querySelectorAll('.qr-tab').forEach(e => e.classList.remove('active'));
+  document.querySelectorAll('.qr-tab')[m === 'create' ? 0 : 1].classList.add('active');
+  document.getElementById('createMode').style.display = m === 'create' ? 'block' : 'none';
+  document.getElementById('joinMode').style.display = m === 'join' ? 'block' : 'none';
 }
 
 function openModal(id) { document.getElementById(id).classList.add('show'); }
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
-function copyMyId() { navigator.clipboard.writeText(myId); notify('ID Copied','success'); }
-function copyText(id) { navigator.clipboard.writeText(document.getElementById(id).value); notify('Copied','success'); }
-function shareOffer() { navigator.share?navigator.share({text:document.getElementById('myOffer').value}):copyText('myOffer'); }
-function shareAnswer() { navigator.share?navigator.share({text:document.getElementById('myAnswer').value}):copyText('myAnswer'); }
-function clearChat() { if(confirm('Clear chat?')){document.getElementById('messages').innerHTML=''; messageHistory=[]; saveChatHistory();} }
+
+function copyMyId() { 
+  navigator.clipboard.writeText(myId); 
+  notify('ID Copied', 'success'); 
+}
+
+function copyText(id) { 
+  navigator.clipboard.writeText(document.getElementById(id).value); 
+  notify('Copied', 'success'); 
+}
+
+function shareOffer() { 
+  navigator.share ? navigator.share({ text: document.getElementById('myOffer').value }) : copyText('myOffer'); 
+}
+
+function shareAnswer() { 
+  navigator.share ? navigator.share({ text: document.getElementById('myAnswer').value }) : copyText('myAnswer'); 
+}
+
+function clearChat() { 
+  if (confirm('Clear chat?')) {
+    document.getElementById('messages').innerHTML = ''; 
+    messageHistory = []; 
+    saveChatHistory();
+  } 
+}
 
 function notify(msg, type='info') {
-  const c=document.getElementById('notifications'), d=document.createElement('div');
-  d.className='notification '+type; d.innerHTML=`<span>${msg}</span>`; c.appendChild(d);
-  setTimeout(()=>{d.classList.add('notif-out');setTimeout(()=>d.remove(),300);},3000);
+  const c = document.getElementById('notifications');
+  const d = document.createElement('div');
+  
+  d.className = 'notification ' + type; 
+  d.innerHTML = `<span>${msg}</span>`; 
+  c.appendChild(d);
+  
+  setTimeout(() => {
+    d.classList.add('notif-out');
+    setTimeout(() => d.remove(), 300);
+  }, 3000);
 }
 
+// ==========================================
+// Settings & Storage
+// ==========================================
 function loadSettings() {
-  ['autoSave','saveHistory','sound'].forEach(k=>{const t=document.getElementById('toggle'+k.charAt(0).toUpperCase()+k.slice(1));if(t)t.classList.toggle('active',settings[k]);});
+  ['autoSave', 'saveHistory', 'sound'].forEach(k => {
+    const t = document.getElementById('toggle' + k.charAt(0).toUpperCase() + k.slice(1));
+    if (t) t.classList.toggle('active', settings[k]);
+  });
 }
-function toggleSetting(k) { settings[k]=!settings[k]; Storage.set('settings',settings); document.getElementById('toggle'+k.charAt(0).toUpperCase()+k.slice(1)).classList.toggle('active',settings[k]); }
+
+function toggleSetting(k) { 
+  settings[k] = !settings[k]; 
+  Storage.set('settings', settings); 
+  document.getElementById('toggle' + k.charAt(0).toUpperCase() + k.slice(1)).classList.toggle('active', settings[k]); 
+}
 
 function savePeer() {
-  if(!peerId)return; let p=Storage.get('savedPeers')||[];
-  const idx=p.findIndex(x=>x.id===peerId); const d={id:peerId,name:peerName,color:peerColor,ts:Date.now()};
-  if(idx>=0) p[idx]=d; else p.unshift(d);
-  Storage.set('savedPeers',p.slice(0,30)); loadSavedPeers();
+  if (!peerId) return; 
+  let p = Storage.get('savedPeers') || [];
+  const idx = p.findIndex(x => x.id === peerId); 
+  const d = { id: peerId, name: peerName, color: peerColor, ts: Date.now() };
+  
+  if (idx >= 0) p[idx] = d; 
+  else p.unshift(d);
+  
+  Storage.set('savedPeers', p.slice(0, 30)); 
+  loadSavedPeers();
 }
+
 function loadSavedPeers() {
-  const p=Storage.get('savedPeers')||[], l=document.getElementById('savedPeersList');
-  document.getElementById('savedPeersCount').textContent=`(${p.length})`;
-  if(!p.length) return l.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.85rem;">Address book empty</div>';
-  l.innerHTML=p.map((x,i)=>`<div class="peer-item" onclick="showPeerModal(${i})"><div class="peer-avatar" style="background:${x.color}">${x.name[0]}</div><div class="peer-info"><div class="peer-name">${esc(x.name)}</div><div class="peer-time">Last seen: ${new Date(x.ts).toLocaleDateString()}</div></div></div>`).join('');
+  const p = Storage.get('savedPeers') || [];
+  const l = document.getElementById('savedPeersList');
+  document.getElementById('savedPeersCount').textContent = `(${p.length})`;
+  
+  if (!p.length) {
+    l.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-dim);font-size:0.85rem;">Address book empty</div>';
+    return;
+  }
+  
+  l.innerHTML = p.map((x, i) => `
+    <div class="peer-item" onclick="showPeerModal(${i})">
+      <div class="peer-avatar" style="background:${x.color}">${x.name[0]}</div>
+      <div class="peer-info">
+        <div class="peer-name">${esc(x.name)}</div>
+        <div class="peer-time">Last seen: ${new Date(x.ts).toLocaleDateString()}</div>
+      </div>
+    </div>
+  `).join('');
 }
+
 function showPeerModal(i) {
-  const p=(Storage.get('savedPeers')||[])[i]; if(!p)return;
-  document.getElementById('peerModalContent').innerHTML=`
-    <div style="text-align:center;margin-bottom:20px"><div style="width:60px;height:60px;background:${p.color};border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:bold;color:#fff">${p.name[0]}</div>
-    <h3>${esc(p.name)}</h3><div style="font-family:monospace;color:var(--text-dim);font-size:0.8rem">${p.id}</div></div>
+  const p = (Storage.get('savedPeers') || [])[i]; 
+  if (!p) return;
+  
+  document.getElementById('peerModalContent').innerHTML = `
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="width:60px;height:60px;background:${p.color};border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:bold;color:#fff">${p.name[0]}</div>
+      <h3>${esc(p.name)}</h3>
+      <div style="font-family:monospace;color:var(--text-dim);font-size:0.8rem">${p.id}</div>
+    </div>
     <button class="btn btn-secondary btn-full" onclick="navigator.clipboard.writeText('${p.id}');closeModal('peerModal');notify('ID Copied')">Copy ID</button>
     <button class="btn btn-danger btn-full" style="margin-top:10px" onclick="removePeer(${i});closeModal('peerModal')">Delete Peer</button>
-  `; openModal('peerModal');
+  `; 
+  openModal('peerModal');
 }
-function removePeer(i) { const p=Storage.get('savedPeers'); p.splice(i,1); Storage.set('savedPeers',p); loadSavedPeers(); }
 
-function saveChatHistory() { if(settings.saveHistory&&peerId) { const c=Storage.get('history')||{}; c[peerId]=messageHistory.slice(-100); Storage.set('history',c); } }
+function removePeer(i) { 
+  const p = Storage.get('savedPeers'); 
+  p.splice(i, 1); 
+  Storage.set('savedPeers', p); 
+  loadSavedPeers(); 
+}
+
+function saveChatHistory() { 
+  if (settings.saveHistory && peerId) { 
+    const c = Storage.get('history') || {}; 
+    c[peerId] = messageHistory.slice(-100); 
+    Storage.set('history', c); 
+  } 
+}
+
 function loadChatForPeer(id) {
-  if(!settings.saveHistory)return; const h=(Storage.get('history')||{})[id];
-  if(h) { messageHistory=h; document.getElementById('messages').innerHTML=''; h.forEach(m=>{m.type==='system'?addSysMsg(m.text,false):addMsg(m.text,m.type,m.ts,false);}); }
+  if (!settings.saveHistory) return; 
+  const h = (Storage.get('history') || {})[id];
+  
+  if (h) { 
+    messageHistory = h; 
+    document.getElementById('messages').innerHTML = ''; 
+    h.forEach(m => {
+      m.type === 'system' ? addSysMsg(m.text, false) : addMsg(m.text, m.type, m.ts, false);
+    }); 
+  }
 }
 
-function updateStorageInfo() { const kb=(Storage.getSize()/1024).toFixed(1); document.getElementById('storageInfo').textContent=`Utilizing ${kb} KB of local device storage.`; }
-function exportAllData() { const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(Storage.getAll())])); a.download='p2p-backup.json'; a.click(); }
-function importData() { document.getElementById('importInput').click(); }
-function handleImport(e) { const r=new FileReader(); r.onload=ev=>{ try{Object.entries(JSON.parse(ev.target.result)).forEach(([k,v])=>Storage.set(k,v));location.reload();}catch{} }; r.readAsText(e.target.files[0]); }
-function clearAllData() { if(confirm('Wipe everything?')) {Storage.clear();location.reload();} }
-function resetIdentity() { if(confirm('Generate new ID?')) {Storage.remove('myId');location.reload();} }
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function updateStorageInfo() { 
+  const kb = (Storage.getSize() / 1024).toFixed(1); 
+  document.getElementById('storageInfo').textContent = `Utilizing ${kb} KB of local device storage.`; 
+}
 
-window.addEventListener('beforeunload',()=>saveChatHistory());
+function exportAllData() { 
+  const a = document.createElement('a'); 
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(Storage.getAll())])); 
+  a.download = 'p2p-backup.json'; 
+  a.click(); 
+}
+
+function importData() { document.getElementById('importInput').click(); }
+
+function handleImport(e) { 
+  const r = new FileReader(); 
+  r.onload = ev => { 
+    try {
+      Object.entries(JSON.parse(ev.target.result)).forEach(([k, v]) => Storage.set(k, v));
+      location.reload();
+    } catch{} 
+  }; 
+  r.readAsText(e.target.files[0]); 
+}
+
+function clearAllData() { 
+  if (confirm('Wipe everything?')) {
+    Storage.clear();
+    location.reload();
+  } 
+}
+
+function resetIdentity() { 
+  if (confirm('Generate new ID?')) {
+    Storage.remove('myId');
+    location.reload();
+  } 
+}
+
+function esc(s) { 
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); 
+}
+
+window.addEventListener('beforeunload', () => saveChatHistory());
 init();
 </script>
 </body>
