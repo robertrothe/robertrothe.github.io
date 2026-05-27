@@ -3,960 +3,637 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>robertrothe.com</title>
+    <title>P2P2R</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PeerJS for WebRTC abstraction -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <!-- QRious for QR Code generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <!-- HTML5-QRCode for browser-based QR scanning -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#000;overflow:hidden;width:100vw;height:100vh;cursor:none}
-        canvas{display:block;position:absolute;top:0;left:0}
-        #c1{z-index:1}
-        #c2{z-index:2;mix-blend-mode:screen;pointer-events:none}
-        #c3{z-index:3;mix-blend-mode:screen;pointer-events:none}
-        #flash{position:absolute;top:0;left:0;width:100%;height:100%;background:#fff;opacity:0;z-index:10;pointer-events:none}
-        #scan{position:absolute;top:0;left:0;width:100%;height:100%;z-index:6;pointer-events:none;
-            background:repeating-linear-gradient(0deg,transparent,transparent 1px,rgba(0,0,0,0.03) 1px,rgba(0,0,0,0.03) 2px)}
-        #vig{position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;pointer-events:none;
-            background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.7) 100%)}
-        #crt{position:absolute;top:0;left:0;width:100%;height:100%;z-index:7;pointer-events:none;opacity:0.015;
-            background:repeating-linear-gradient(90deg,rgba(255,0,0,0.5) 0px,rgba(0,255,0,0.5) 1px,rgba(0,0,255,0.5) 2px,transparent 3px)}
+        .drag-over {
+            border-color: #6366f1 !important;
+            background-color: rgba(99, 102, 241, 0.05);
+        }
     </style>
 </head>
-<body>
-<canvas id="c1"></canvas>
-<canvas id="c2"></canvas>
-<canvas id="c3"></canvas>
-<div id="flash"></div>
-<div id="scan"></div>
-<div id="vig"></div>
-<div id="crt"></div>
-<script>
-(function(){
-"use strict";
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col justify-between font-sans">
 
-// ==================== AUDIO ENGINE ====================
-const AC=new(window.AudioContext||window.webkitAudioContext)();
-if(AC.state==='suspended')AC.resume();
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
+        <div class="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <i data-lucide="shuffle" class="text-indigo-500 w-6 h-6"></i>
+                <span class="font-bold text-xl tracking-tight">P2P Share</span>
+            </div>
+            <span class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-full border border-slate-700 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Direct Connection
+            </span>
+        </div>
+    </header>
 
-function createReverb(duration,decay){
-    const len=AC.sampleRate*duration;
-    const buf=AC.createBuffer(2,len,AC.sampleRate);
-    for(let ch=0;ch<2;ch++){
-        const d=buf.getChannelData(ch);
-        for(let i=0;i<len;i++){
-            d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);
-        }
-    }
-    const conv=AC.createConvolver();
-    conv.buffer=buf;
-    return conv;
-}
+    <!-- Main Content Area -->
+    <main class="max-w-xl w-full mx-auto px-4 py-8 flex-grow flex flex-col justify-center">
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm min-h-[400px] flex flex-col justify-between">
+            
+            <!-- VIEW: Home (Choice) -->
+            <div id="view-home" class="space-y-6 my-auto">
+                <div class="text-center space-y-2">
+                    <h1 class="text-2xl font-semibold">Share Files Privately</h1>
+                    <p class="text-slate-400 text-sm max-w-sm mx-auto">Transfer files directly between devices without storing them on a third-party server.</p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button id="btn-choose-send" class="flex flex-col items-center justify-center p-6 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-xl gap-3 font-medium shadow-lg shadow-indigo-500/10">
+                        <i data-lucide="upload-cloud" class="w-8 h-8"></i>
+                        <span>Send Files</span>
+                    </button>
+                    <button id="btn-choose-receive" class="flex flex-col items-center justify-center p-6 bg-slate-700 hover:bg-slate-600 transition-colors rounded-xl gap-3 font-medium border border-slate-600/50">
+                        <i data-lucide="download-cloud" class="w-8 h-8"></i>
+                        <span>Receive Files</span>
+                    </button>
+                </div>
+            </div>
 
-const masterGain=AC.createGain();
-masterGain.gain.value=0.7;
-const reverb=createReverb(3,2.5);
-const reverbGain=AC.createGain();
-reverbGain.gain.value=0.3;
-reverb.connect(reverbGain).connect(masterGain);
-masterGain.connect(AC.destination);
-const dryBus=AC.createGain();
-dryBus.gain.value=0.7;
-dryBus.connect(masterGain);
-dryBus.connect(reverb);
+            <!-- VIEW: Send - File Selection -->
+            <div id="view-send-select" class="hidden space-y-6">
+                <div class="flex items-center gap-2 text-slate-400 text-sm">
+                    <button class="btn-back hover:text-white flex items-center gap-1">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+                    </button>
+                </div>
+                <h2 class="text-xl font-semibold">Select files to transfer</h2>
+                <div id="drop-zone" class="border-2 border-dashed border-slate-600 rounded-xl p-8 text-center cursor-pointer hover:border-indigo-500 transition-colors flex flex-col items-center justify-center gap-3">
+                    <i data-lucide="file-plus" class="w-12 h-12 text-slate-500"></i>
+                    <div>
+                        <p class="font-medium text-slate-200">Drag & drop your file here</p>
+                        <p class="text-xs text-slate-400 mt-1">or click to browse your system</p>
+                    </div>
+                    <input type="file" id="file-input" class="hidden">
+                </div>
+                <div id="selected-file-info" class="hidden bg-slate-900/50 border border-slate-700/50 rounded-lg p-4 flex items-center justify-between">
+                    <div class="flex items-center gap-3 truncate">
+                        <i data-lucide="file" class="w-8 h-8 text-indigo-400 flex-shrink-0"></i>
+                        <div class="truncate">
+                            <p id="info-file-name" class="font-medium text-sm truncate">filename.ext</p>
+                            <p id="info-file-size" class="text-xs text-slate-400">0 KB</p>
+                        </div>
+                    </div>
+                    <button id="btn-start-share" class="bg-indigo-600 hover:bg-indigo-500 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5 flex-shrink-0">
+                        Next <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
 
-// PS2-style boot drone sequence
-function playBootSequence(){
-    const now=AC.currentTime;
+            <!-- VIEW: Send - Share QR -->
+            <div id="view-send-share" class="hidden space-y-6 text-center">
+                <div class="flex items-center gap-2 text-slate-400 text-sm text-left">
+                    <button class="btn-back hover:text-white flex items-center gap-1">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Cancel
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <h2 class="text-xl font-semibold">Scan to Receive</h2>
+                    <p class="text-xs text-slate-400">Scan this QR code with the receiving device or share the link.</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl inline-block mx-auto shadow-inner">
+                    <canvas id="qr-canvas"></canvas>
+                </div>
+                <div class="space-y-3">
+                    <div class="flex items-center gap-2 bg-slate-900/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm">
+                        <span class="text-slate-500 select-none text-xs uppercase font-semibold">Link</span>
+                        <input id="share-url-input" type="text" readonly class="bg-transparent border-none outline-none flex-grow text-slate-300 text-xs overflow-ellipsis">
+                        <button id="btn-copy-link" class="text-slate-400 hover:text-white transition-colors">
+                            <i data-lucide="copy" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <p class="text-xs text-indigo-400 animate-pulse flex items-center justify-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> Waiting for receiver to connect...
+                    </p>
+                </div>
+            </div>
 
-    // Phase 1: Deep sub rumble (0-6s)
-    const sub=AC.createOscillator();
-    const subG=AC.createGain();
-    sub.type='sine';
-    sub.frequency.setValueAtTime(25,now);
-    sub.frequency.linearRampToValueAtTime(45,now+3);
-    sub.frequency.linearRampToValueAtTime(60,now+6);
-    subG.gain.setValueAtTime(0,now);
-    subG.gain.linearRampToValueAtTime(0.25,now+1.5);
-    subG.gain.setValueAtTime(0.25,now+4);
-    subG.gain.linearRampToValueAtTime(0,now+6.5);
-    sub.connect(subG).connect(dryBus);
-    sub.start(now);sub.stop(now+7);
+            <!-- VIEW: Receive - Scanning/Setup -->
+            <div id="view-receive-setup" class="hidden space-y-6">
+                <div class="flex items-center gap-2 text-slate-400 text-sm">
+                    <button class="btn-back hover:text-white flex items-center gap-1">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+                    </button>
+                </div>
+                <h2 class="text-xl font-semibold">Establish Connection</h2>
+                
+                <div class="space-y-4">
+                    <div id="scanner-container" class="hidden space-y-2">
+                        <div id="qr-reader" class="overflow-hidden rounded-xl border border-slate-700 bg-black"></div>
+                        <button id="btn-stop-scanner" class="w-full py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-lg text-sm font-medium transition-colors">
+                            Stop Camera
+                        </button>
+                    </div>
 
-    // Phase 1b: Sub harmonic
-    const sub2=AC.createOscillator();
-    const sub2G=AC.createGain();
-    sub2.type='sine';
-    sub2.frequency.setValueAtTime(50,now);
-    sub2.frequency.linearRampToValueAtTime(90,now+5);
-    sub2G.gain.setValueAtTime(0,now);
-    sub2G.gain.linearRampToValueAtTime(0.08,now+2);
-    sub2G.gain.linearRampToValueAtTime(0,now+6);
-    sub2.connect(sub2G).connect(dryBus);
-    sub2.start(now);sub2.stop(now+6.5);
+                    <div id="receive-options" class="grid grid-cols-1 gap-3">
+                        <button id="btn-start-scanner" class="flex items-center justify-center gap-2 p-4 bg-slate-700 hover:bg-slate-600 transition-colors rounded-xl font-medium border border-slate-600/50">
+                            <i data-lucide="camera" class="w-5 h-5 text-indigo-400"></i>
+                            Scan QR Code
+                        </button>
+                        
+                        <div class="relative flex py-2 items-center">
+                            <div class="flex-grow border-t border-slate-700"></div>
+                            <span class="flex-shrink mx-4 text-slate-500 text-xs uppercase">or manually enter code</span>
+                            <div class="flex-grow border-t border-slate-700"></div>
+                        </div>
 
-    // Phase 2: Rising texture (1-5s) - filtered noise
-    const noiseBuf=AC.createBuffer(1,AC.sampleRate*5,AC.sampleRate);
-    const nd=noiseBuf.getChannelData(0);
-    for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
-    const noise=AC.createBufferSource();
-    noise.buffer=noiseBuf;
-    const noiseFilt=AC.createBiquadFilter();
-    noiseFilt.type='bandpass';
-    noiseFilt.frequency.setValueAtTime(100,now+1);
-    noiseFilt.frequency.exponentialRampToValueAtTime(3000,now+4);
-    noiseFilt.frequency.exponentialRampToValueAtTime(200,now+5.5);
-    noiseFilt.Q.value=2;
-    const noiseG=AC.createGain();
-    noiseG.gain.setValueAtTime(0,now+1);
-    noiseG.gain.linearRampToValueAtTime(0.06,now+3);
-    noiseG.gain.linearRampToValueAtTime(0,now+5.5);
-    noise.connect(noiseFilt).connect(noiseG).connect(dryBus);
-    noise.start(now+1);
+                        <div class="flex gap-2">
+                            <input id="input-peer-id" type="text" placeholder="Enter peer connection code" class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm flex-grow focus:outline-none focus:border-indigo-500 text-slate-100">
+                            <button id="btn-connect-manual" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors">
+                                Connect
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    // Phase 3: Ethereal shimmer tones (2-7s)
-    const shimmerFreqs=[220,330,440,554,660,880];
-    shimmerFreqs.forEach((f,i)=>{
-        const o=AC.createOscillator();
-        const g=AC.createGain();
-        o.type='sine';
-        o.frequency.value=f;
-        o.detune.setValueAtTime(-10+Math.random()*20,now+2);
-        g.gain.setValueAtTime(0,now+2+i*0.2);
-        g.gain.linearRampToValueAtTime(0.012,now+3+i*0.2);
-        g.gain.linearRampToValueAtTime(0.018,now+4.5);
-        g.gain.linearRampToValueAtTime(0,now+7);
-        o.connect(g).connect(dryBus);
-        o.start(now+2+i*0.2);o.stop(now+7.5);
-    });
+            <!-- VIEW: Active Transfer / Progress -->
+            <div id="view-transfer" class="hidden space-y-6 my-auto">
+                <div class="text-center space-y-2">
+                    <div class="inline-flex p-3 bg-indigo-500/10 text-indigo-400 rounded-full animate-bounce">
+                        <i data-lucide="arrow-up-down" class="w-6 h-6"></i>
+                    </div>
+                    <h2 id="transfer-status-title" class="text-xl font-semibold">Transferring</h2>
+                    <p id="transfer-file-name" class="text-slate-400 text-sm truncate max-w-sm mx-auto">filename.ext</p>
+                </div>
 
-    // Phase 4: Whoosh/sweep (3.5-5s)
-    const sweep=AC.createOscillator();
-    const sweepG=AC.createGain();
-    sweep.type='sawtooth';
-    sweep.frequency.setValueAtTime(40,now+3.5);
-    sweep.frequency.exponentialRampToValueAtTime(800,now+4.8);
-    sweep.frequency.exponentialRampToValueAtTime(60,now+5.5);
-    sweepG.gain.setValueAtTime(0,now+3.5);
-    sweepG.gain.linearRampToValueAtTime(0.04,now+4.3);
-    sweepG.gain.linearRampToValueAtTime(0,now+5.5);
-    const sweepFilt=AC.createBiquadFilter();
-    sweepFilt.type='lowpass';
-    sweepFilt.frequency.setValueAtTime(200,now+3.5);
-    sweepFilt.frequency.exponentialRampToValueAtTime(5000,now+4.8);
-    sweepFilt.frequency.exponentialRampToValueAtTime(200,now+5.5);
-    sweep.connect(sweepFilt).connect(sweepG).connect(dryBus);
-    sweep.start(now+3.5);sweep.stop(now+6);
+                <div class="space-y-2">
+                    <div class="flex justify-between text-xs text-slate-400">
+                        <span id="transfer-progress-percent">0%</span>
+                        <span id="transfer-speed">0 KB/s</span>
+                    </div>
+                    <div class="w-full bg-slate-700 rounded-full h-2.5 overflow-hidden">
+                        <div id="transfer-progress-bar" class="bg-indigo-500 h-2.5 rounded-full transition-all duration-100" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-slate-400">
+                        <span id="transfer-details">0 MB / 0 MB</span>
+                        <span id="transfer-time">Estimating...</span>
+                    </div>
+                </div>
+            </div>
 
-    // Phase 5: Impact hit (5s)
-    const impact=AC.createOscillator();
-    const impactG=AC.createGain();
-    impact.type='sine';
-    impact.frequency.setValueAtTime(150,now+5);
-    impact.frequency.exponentialRampToValueAtTime(25,now+6.5);
-    impactG.gain.setValueAtTime(0.35,now+5);
-    impactG.gain.exponentialRampToValueAtTime(0.001,now+6.5);
-    impact.connect(impactG).connect(dryBus);
-    impact.start(now+5);impact.stop(now+7);
+            <!-- Footer log block inside card for contextual feedback -->
+            <div id="log-panel" class="mt-4 pt-3 border-t border-slate-700/50 text-left text-[10px] font-mono text-slate-500 flex justify-between items-center">
+                <span id="status-text">Status: Ready</span>
+                <span id="connection-indicator" class="hidden flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> Connected
+                </span>
+            </div>
 
-    // Impact noise burst
-    const impNoise=AC.createBuffer(1,AC.sampleRate*0.3,AC.sampleRate);
-    const ind=impNoise.getChannelData(0);
-    for(let i=0;i<ind.length;i++)ind[i]=(Math.random()*2-1)*Math.exp(-i/(AC.sampleRate*0.05));
-    const impNoiseSrc=AC.createBufferSource();
-    impNoiseSrc.buffer=impNoise;
-    const impNoiseG=AC.createGain();
-    impNoiseG.gain.setValueAtTime(0.12,now+5);
-    impNoiseG.gain.exponentialRampToValueAtTime(0.001,now+5.4);
-    impNoiseSrc.connect(impNoiseG).connect(dryBus);
-    impNoiseSrc.start(now+5);
+        </div>
+    </main>
 
-    // Phase 6: Resolution chime / chord (5.2-9s)
-    const chimeNotes=[261.63,329.63,392,523.25,659.25];
-    chimeNotes.forEach((f,i)=>{
-        const o=AC.createOscillator();
-        const g=AC.createGain();
-        o.type='sine';
-        o.frequency.value=f;
-        const t=now+5.2+i*0.12;
-        g.gain.setValueAtTime(0,t);
-        g.gain.linearRampToValueAtTime(0.05,t+0.05);
-        g.gain.exponentialRampToValueAtTime(0.02,t+1);
-        g.gain.exponentialRampToValueAtTime(0.001,t+3.5);
-        o.connect(g).connect(dryBus);
-        o.start(t);o.stop(t+4);
+    <!-- Footer -->
+    <footer class="text-center py-6 text-xs text-slate-500 border-t border-slate-800 bg-slate-900/30">
+        <p>Direct peer-to-peer transfer. File processing occurs exclusively on device.</p>
+    </footer>
 
-        // Harmonics
-        const h=AC.createOscillator();
-        const hg=AC.createGain();
-        h.type='sine';
-        h.frequency.value=f*2;
-        hg.gain.setValueAtTime(0,t);
-        hg.gain.linearRampToValueAtTime(0.015,t+0.05);
-        hg.gain.exponentialRampToValueAtTime(0.001,t+2);
-        h.connect(hg).connect(dryBus);
-        h.start(t);h.stop(t+2.5);
-    });
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
 
-    // Phase 7: Ambient pad sustain (6-∞)
-    const padFreqs=[130.81,196,261.63,329.63];
-    padFreqs.forEach((f,i)=>{
-        const o=AC.createOscillator();
-        const g=AC.createGain();
-        o.type='sine';
-        o.frequency.value=f;
-        const lfo=AC.createOscillator();
-        const lfoG=AC.createGain();
-        lfo.type='sine';
-        lfo.frequency.value=0.2+i*0.1;
-        lfoG.gain.value=3;
-        lfo.connect(lfoG).connect(o.detune);
-        lfo.start(now+6);
-        g.gain.setValueAtTime(0,now+6);
-        g.gain.linearRampToValueAtTime(0.015,now+8);
-        o.connect(g).connect(dryBus);
-        o.start(now+6);
-    });
-}
+        // App States & Globals
+        let peer = null;
+        let connection = null;
+        let activeFile = null;
+        let receivedChunks = [];
+        let expectedFileSize = 0;
+        let receivedBytes = 0;
+        let mimeType = '';
+        let html5QrCode = null;
+        let transferStartTime = null;
+        let lastLoggedBytes = 0;
+        let speedInterval = null;
 
-playBootSequence();
+        // Buffer limits for backpressure
+        const CHUNK_SIZE = 64 * 1024; // 64KB
+        const MAX_BUFFERED_AMOUNT = 1024 * 1024; // 1MB buffer limit
 
-// ==================== CANVAS SETUP ====================
-const c1=document.getElementById('c1');
-const c2=document.getElementById('c2');
-const c3=document.getElementById('c3');
-const ctx=c1.getContext('2d');
-const gCtx=c2.getContext('2d');
-const pCtx=c3.getContext('2d');
+        // Navigation elements
+        const views = {
+            home: document.getElementById('view-home'),
+            sendSelect: document.getElementById('view-send-select'),
+            sendShare: document.getElementById('view-send-share'),
+            receiveSetup: document.getElementById('view-receive-setup'),
+            transfer: document.getElementById('view-transfer')
+        };
 
-let W,H,cx,cy;
-function resize(){
-    W=window.innerWidth;H=window.innerHeight;
-    cx=W/2;cy=H/2;
-    [c1,c2,c3].forEach(c=>{c.width=W;c.height=H});
-}
-resize();
-window.addEventListener('resize',resize);
+        const statusText = document.getElementById('status-text');
+        const connectionIndicator = document.getElementById('connection-indicator');
 
-// ==================== UTILITIES ====================
-function lerp(a,b,t){return a+(b-a)*t}
-function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
-function easeOut(t){return 1-Math.pow(1-t,4)}
-function easeIn(t){return t*t*t}
-function easeInOut(t){return t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
-function smoothstep(a,b,t){t=clamp((t-a)/(b-a),0,1);return t*t*(3-2*t)}
-function hsl(h,s,l,a){return`hsla(${h},${s}%,${l}%,${a})`}
-
-// ==================== PILLAR SYSTEM ====================
-class Pillar{
-    constructor(i,total){
-        this.i=i;
-        this.reset(total);
-    }
-    reset(total){
-        this.x=(Math.random()-0.5)*12;
-        this.z=2+Math.random()*30;
-        this.h=1+Math.random()*4;
-        this.w=0.015+Math.random()*0.06;
-        this.baseHue=195+Math.random()*30;
-        this.sat=70+Math.random()*30;
-        this.lit=40+Math.random()*30;
-        this.speed=0.3+Math.random()*2;
-        this.glow=0.5+Math.random()*0.5;
-        this.segments=3+Math.floor(Math.random()*5);
-        this.segOffsets=[];
-        for(let s=0;s<this.segments;s++)this.segOffsets.push(Math.random()*Math.PI*2);
-    }
-    project(x,y,z){
-        const f=500/z;
-        return{x:cx+x*f,y:cy+y*f,s:f};
-    }
-    update(dt){
-        this.z-=this.speed*dt;
-        if(this.z<0.2){this.reset();this.z=25+Math.random()*10;}
-    }
-    draw(ctx,gCtx,t,alpha){
-        if(this.z<0.3||alpha<0.01)return;
-        const bot=this.project(this.x,2,this.z);
-        const top=this.project(this.x,2-this.h,this.z);
-        const pw=Math.max(1,this.w*bot.s);
-        const zFade=clamp(1-this.z/30,0,1);
-        const a=alpha*zFade;
-        if(a<0.005)return;
-
-        // Segments with animated brightness
-        const segH=(bot.y-top.y)/this.segments;
-        for(let s=0;s<this.segments;s++){
-            const sy=top.y+s*segH;
-            const segBright=0.5+0.5*Math.sin(t*2+this.segOffsets[s]);
-            const segA=a*(0.3+0.7*segBright);
-            const grad=ctx.createLinearGradient(bot.x-pw,sy,bot.x+pw,sy);
-            grad.addColorStop(0,hsl(this.baseHue,this.sat,this.lit*0.3,0));
-            grad.addColorStop(0.2,hsl(this.baseHue,this.sat,this.lit,segA*0.5));
-            grad.addColorStop(0.5,hsl(this.baseHue,this.sat,this.lit+20,segA*0.8));
-            grad.addColorStop(0.8,hsl(this.baseHue,this.sat,this.lit,segA*0.5));
-            grad.addColorStop(1,hsl(this.baseHue,this.sat,this.lit*0.3,0));
-            ctx.fillStyle=grad;
-            ctx.fillRect(bot.x-pw,sy,pw*2,segH+1);
+        function setStatus(text) {
+            statusText.textContent = `Status: ${text}`;
         }
 
-        // Top cap glow
-        const capGrad=gCtx.createRadialGradient(top.x,top.y,0,top.x,top.y,pw*6);
-        capGrad.addColorStop(0,hsl(this.baseHue,100,80,a*0.2*this.glow));
-        capGrad.addColorStop(1,'transparent');
-        gCtx.fillStyle=capGrad;
-        gCtx.fillRect(top.x-pw*6,top.y-pw*6,pw*12,pw*12);
-
-        // Edge highlights
-        ctx.strokeStyle=hsl(this.baseHue,100,85,a*0.3);
-        ctx.lineWidth=0.5;
-        ctx.beginPath();
-        ctx.moveTo(bot.x-pw/2,bot.y);ctx.lineTo(top.x-pw/2,top.y);
-        ctx.moveTo(bot.x+pw/2,bot.y);ctx.lineTo(top.x+pw/2,top.y);
-        ctx.stroke();
-    }
-}
-
-const pillars=[];
-for(let i=0;i<80;i++)pillars.push(new Pillar(i,80));
-
-// ==================== PARTICLE SYSTEMS ====================
-class StreamParticle{
-    constructor(){this.reset();}
-    reset(){
-        const a=Math.random()*Math.PI*2;
-        const d=300+Math.random()*600;
-        this.x=cx+Math.cos(a)*d;
-        this.y=cy+Math.sin(a)*d;
-        this.tx=cx+(Math.random()-0.5)*100;
-        this.ty=cy+(Math.random()-0.5)*60;
-        this.size=0.5+Math.random()*2;
-        this.speed=1+Math.random()*3;
-        this.alpha=0;
-        this.hue=190+Math.random()*40;
-        this.trail=[];
-        this.alive=true;
-        this.arrived=false;
-    }
-    update(dt){
-        if(!this.alive)return;
-        const dx=this.tx-this.x,dy=this.ty-this.y;
-        const dist=Math.sqrt(dx*dx+dy*dy);
-        this.trail.push({x:this.x,y:this.y,a:this.alpha});
-        if(this.trail.length>20)this.trail.shift();
-        if(dist>3){
-            this.x+=dx*dt*this.speed;
-            this.y+=dy*dt*this.speed;
-            this.alpha=Math.min(1,this.alpha+dt*3);
-        }else{
-            this.arrived=true;
-            this.alpha-=dt*3;
-            if(this.alpha<=0)this.alive=false;
-        }
-    }
-    draw(ctx){
-        if(!this.alive||this.alpha<=0)return;
-        // Trail
-        if(this.trail.length>1){
-            ctx.beginPath();
-            ctx.moveTo(this.trail[0].x,this.trail[0].y);
-            for(let i=1;i<this.trail.length;i++){
-                ctx.lineTo(this.trail[i].x,this.trail[i].y);
+        function switchView(viewName) {
+            Object.keys(views).forEach(key => {
+                if (key === viewName) {
+                    views[key].classList.remove('hidden');
+                } else {
+                    views[key].classList.add('hidden');
+                }
+            });
+            // Stop scanning if leaving the scanner view
+            if (viewName !== 'receiveSetup' && html5QrCode) {
+                stopScanner();
             }
-            ctx.lineTo(this.x,this.y);
-            ctx.strokeStyle=hsl(this.hue,100,70,this.alpha*0.3);
-            ctx.lineWidth=this.size*0.5;
-            ctx.stroke();
-        }
-        ctx.beginPath();
-        ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
-        ctx.fillStyle=hsl(this.hue,100,85,this.alpha);
-        ctx.fill();
-    }
-}
-
-class DustParticle{
-    constructor(){this.reset();}
-    reset(){
-        this.x=Math.random()*W;
-        this.y=Math.random()*H;
-        this.vx=(Math.random()-0.5)*15;
-        this.vy=(Math.random()-0.5)*15;
-        this.size=0.3+Math.random()*1.5;
-        this.life=1;
-        this.maxLife=4+Math.random()*6;
-        this.hue=200+Math.random()*30;
-    }
-    update(dt){
-        this.x+=this.vx*dt;this.y+=this.vy*dt;
-        this.life-=dt/this.maxLife;
-        if(this.life<=0||this.x<-50||this.x>W+50||this.y<-50||this.y>H+50)this.reset();
-    }
-    draw(ctx,alpha){
-        const a=Math.sin(this.life*Math.PI)*0.4*alpha;
-        if(a<0.01)return;
-        ctx.beginPath();
-        ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
-        ctx.fillStyle=hsl(this.hue,60,80,a);
-        ctx.fill();
-    }
-}
-
-class Star{
-    constructor(){
-        this.x=Math.random()*W;
-        this.y=Math.random()*H;
-        this.size=Math.random()*1.2+0.2;
-        this.twinkleSpd=1+Math.random()*4;
-        this.phase=Math.random()*Math.PI*2;
-        this.bright=0.1+Math.random()*0.4;
-    }
-    draw(ctx,t,a){
-        const tw=0.3+0.7*Math.sin(t*this.twinkleSpd+this.phase);
-        const al=a*this.bright*tw;
-        if(al<0.01)return;
-        ctx.beginPath();
-        ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
-        ctx.fillStyle=hsl(220,30,90,al);
-        ctx.fill();
-    }
-}
-
-const dust=[];for(let i=0;i<100;i++)dust.push(new DustParticle());
-const stars=[];for(let i=0;i<200;i++)stars.push(new Star());
-const streamParticles=[];
-let streamsSpawned=false;
-
-// ==================== GRID ====================
-function drawGrid(ctx,t,alpha,speed){
-    if(alpha<0.005)return;
-    const horizY=cy+60;
-    ctx.save();
-
-    // Horizontal lines
-    for(let i=0;i<40;i++){
-        const z=i*1.5+(t*speed*40)%1.5;
-        const y=horizY+Math.pow(z,1.6)*1.8;
-        if(y>H+10)continue;
-        const la=alpha*clamp(1-i/40,0,1)*0.15;
-        if(la<0.003)continue;
-        ctx.strokeStyle=hsl(210,100,50,la);
-        ctx.lineWidth=la>0.05?1:0.5;
-        ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
-    }
-
-    // Vertical converging lines
-    for(let i=-25;i<=25;i++){
-        const la=alpha*clamp(1-Math.abs(i)/25,0,1)*0.12;
-        if(la<0.003)continue;
-        ctx.strokeStyle=hsl(210,100,50,la);
-        ctx.lineWidth=0.5;
-        ctx.beginPath();
-        ctx.moveTo(cx+i*55,H+20);
-        ctx.lineTo(cx+i*1.5,horizY);
-        ctx.stroke();
-    }
-    ctx.restore();
-}
-
-// ==================== RINGS ====================
-function drawRings(ctx,t,alpha){
-    if(alpha<0.005)return;
-    for(let i=0;i<5;i++){
-        const r=80+i*55+Math.sin(t*1.2+i*1.3)*8;
-        const a=alpha*(0.06+i*0.02)*(0.4+0.6*Math.sin(t*0.8+i*0.7));
-        if(a<0.003)continue;
-
-        // Main ring
-        ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);
-        ctx.strokeStyle=hsl(200+i*12,100,60,a);
-        ctx.lineWidth=1.5;ctx.stroke();
-
-        // Dashed overlay
-        ctx.save();
-        ctx.setLineDash([3+i*2,10+i*3]);
-        ctx.lineDashOffset=-t*60*(i%2?1:-1);
-        ctx.beginPath();ctx.arc(cx,cy,r+8+i*3,0,Math.PI*2);
-        ctx.strokeStyle=hsl(200+i*12,100,75,a*0.4);
-        ctx.lineWidth=0.8;ctx.stroke();
-        ctx.restore();
-
-        // Tick marks
-        const ticks=12+i*4;
-        for(let j=0;j<ticks;j++){
-            const angle=(j/ticks)*Math.PI*2+t*0.3*(i%2?1:-1);
-            const innerR=r-4;const outerR=r+4;
-            const tickA=a*0.5*(0.3+0.7*Math.sin(t*3+j+i));
-            if(tickA<0.003)continue;
-            ctx.beginPath();
-            ctx.moveTo(cx+Math.cos(angle)*innerR,cy+Math.sin(angle)*innerR);
-            ctx.lineTo(cx+Math.cos(angle)*outerR,cy+Math.sin(angle)*outerR);
-            ctx.strokeStyle=hsl(200+i*12,100,80,tickA);
-            ctx.lineWidth=1;ctx.stroke();
-        }
-    }
-}
-
-// ==================== LIGHT BEAMS ====================
-function drawBeams(ctx,t,alpha){
-    if(alpha<0.005)return;
-
-    // Central vertical beam
-    const bw=2+Math.sin(t*3)*0.8;
-    let grad=ctx.createLinearGradient(cx,0,cx,H);
-    grad.addColorStop(0,hsl(210,100,90,0));
-    grad.addColorStop(0.2,hsl(210,100,90,alpha*0.08));
-    grad.addColorStop(0.5,hsl(210,100,95,alpha*0.35));
-    grad.addColorStop(0.8,hsl(210,100,90,alpha*0.08));
-    grad.addColorStop(1,hsl(210,100,90,0));
-    ctx.fillStyle=grad;
-    ctx.fillRect(cx-bw,0,bw*2,H);
-
-    // Wide bloom
-    grad=ctx.createLinearGradient(cx-120,0,cx+120,0);
-    grad.addColorStop(0,'transparent');
-    grad.addColorStop(0.5,hsl(210,100,80,alpha*0.06));
-    grad.addColorStop(1,'transparent');
-    ctx.fillStyle=grad;
-    ctx.fillRect(cx-120,0,240,H);
-
-    // Horizontal sweep beam
-    const sweepX=cx+Math.sin(t*0.7)*200;
-    grad=ctx.createLinearGradient(0,cy,W,cy);
-    grad.addColorStop(0,hsl(210,100,90,0));
-    grad.addColorStop(clamp((sweepX-100)/W,0,1),hsl(210,100,90,0));
-    grad.addColorStop(clamp(sweepX/W,0,1),hsl(210,100,95,alpha*0.12));
-    grad.addColorStop(clamp((sweepX+100)/W,0,1),hsl(210,100,90,0));
-    grad.addColorStop(1,hsl(210,100,90,0));
-    ctx.fillStyle=grad;
-    ctx.fillRect(0,cy-1.5,W,3);
-}
-
-// ==================== LENS FLARE ====================
-function drawFlare(ctx,x,y,intensity,t){
-    if(intensity<0.005)return;
-
-    // Core
-    let g=ctx.createRadialGradient(x,y,0,x,y,15);
-    g.addColorStop(0,hsl(210,100,100,intensity*0.9));
-    g.addColorStop(0.5,hsl(210,100,90,intensity*0.3));
-    g.addColorStop(1,'transparent');
-    ctx.fillStyle=g;
-    ctx.fillRect(x-15,y-15,30,30);
-
-    // Main bloom
-    g=ctx.createRadialGradient(x,y,0,x,y,250*intensity);
-    g.addColorStop(0,hsl(210,100,95,0.25*intensity));
-    g.addColorStop(0.2,hsl(215,100,70,0.1*intensity));
-    g.addColorStop(0.5,hsl(220,100,50,0.03*intensity));
-    g.addColorStop(1,'transparent');
-    ctx.fillStyle=g;
-    ctx.fillRect(x-300,y-300,600,600);
-
-    // Anamorphic streak
-    ctx.save();
-    ctx.globalAlpha=intensity*0.5;
-    g=ctx.createLinearGradient(x-500,y,x+500,y);
-    g.addColorStop(0,'transparent');
-    g.addColorStop(0.2,hsl(200,100,80,0.3));
-    g.addColorStop(0.45,hsl(210,100,90,0.8));
-    g.addColorStop(0.5,hsl(210,100,98,1));
-    g.addColorStop(0.55,hsl(210,100,90,0.8));
-    g.addColorStop(0.8,hsl(220,100,80,0.3));
-    g.addColorStop(1,'transparent');
-    ctx.fillStyle=g;
-    ctx.fillRect(x-500,y-1.5,1000,3);
-    // Wider softer streak
-    g=ctx.createLinearGradient(x-400,y,x+400,y);
-    g.addColorStop(0,'transparent');
-    g.addColorStop(0.3,hsl(200,80,70,0.15));
-    g.addColorStop(0.5,hsl(210,100,85,0.4));
-    g.addColorStop(0.7,hsl(220,80,70,0.15));
-    g.addColorStop(1,'transparent');
-    ctx.fillStyle=g;
-    ctx.fillRect(x-400,y-6,800,12);
-    ctx.restore();
-
-    // Ghost flares
-    const ghosts=[-0.8,-0.5,-0.2,0.3,0.6,1.0,1.4,1.8];
-    ghosts.forEach((p,i)=>{
-        const gx=x+(cx-x)*p;
-        const gy=y+(cy-y)*p;
-        const gs=(15+i*8)*intensity;
-        const ga=0.04*intensity*(0.5+0.5*Math.sin(t+i));
-        if(ga<0.003)return;
-        const colors=[200,220,180,250,210,190,230,200];
-        const gg=ctx.createRadialGradient(gx,gy,0,gx,gy,gs);
-        gg.addColorStop(0,hsl(colors[i],100,70,ga));
-        gg.addColorStop(0.5,hsl(colors[i],100,50,ga*0.3));
-        gg.addColorStop(1,'transparent');
-        ctx.fillStyle=gg;
-        ctx.fillRect(gx-gs,gy-gs,gs*2,gs*2);
-
-        // Ring ghost
-        if(i%2===0){
-            ctx.beginPath();ctx.arc(gx,gy,gs*0.7,0,Math.PI*2);
-            ctx.strokeStyle=hsl(colors[i],100,70,ga*0.5);
-            ctx.lineWidth=1;ctx.stroke();
-        }
-    });
-}
-
-// ==================== TEXT RENDERING ====================
-function measureText(ctx,text,fontSize){
-    ctx.font=`900 ${fontSize}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
-    return ctx.measureText(text);
-}
-
-function drawTextSequence(ctx,gCtx,t,elapsed){
-    const textRevealStart=5.0;
-    const textRevealEnd=7.0;
-    const dotComStart=6.5;
-    const dotComEnd=7.5;
-
-    if(elapsed<textRevealStart-0.5)return;
-
-    const mainText='robertrothe';
-    const subText='.com';
-    const fontSize=Math.min(W*0.078,85);
-    const subFontSize=Math.min(W*0.028,32);
-
-    ctx.font=`900 ${fontSize}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
-    ctx.textAlign='left';
-    ctx.textBaseline='middle';
-
-    const chars=mainText.split('');
-    const charWidths=chars.map(c=>ctx.measureText(c).width);
-    const totalWidth=charWidths.reduce((a,b)=>a+b,0);
-    let startX=cx-totalWidth/2;
-
-    const progress=smoothstep(textRevealStart,textRevealEnd,elapsed);
-
-    chars.forEach((char,i)=>{
-        const charProg=clamp((progress*chars.length-i)*1.2,0,1);
-        if(charProg<=0)return;
-
-        const ep=easeOut(charProg);
-        const x=startX+charWidths[i]/2;
-        const y=cy;
-
-        // Per-character displacement that settles
-        const displaceY=(1-ep)*(-30-i*5);
-        const displaceX=(1-ep)*(Math.sin(i*2.1)*20);
-        const charAlpha=ep;
-        const charScale=1+(1-ep)*1.5;
-
-        ctx.save();
-        ctx.translate(x+displaceX,y+displaceY);
-        ctx.scale(charScale,charScale);
-        ctx.globalAlpha=charAlpha;
-
-        // Multiple glow passes
-        const glowLayers=[
-            {blur:0,color:hsl(210,80,95,1),alpha:1},
-        ];
-
-        // Outer glow on glow canvas
-        if(charAlpha>0.1){
-            const glowSize=fontSize*1.5;
-            const gg=gCtx.createRadialGradient(x+displaceX,y+displaceY,0,x+displaceX,y+displaceY,glowSize);
-            gg.addColorStop(0,hsl(210,100,70,charAlpha*0.08));
-            gg.addColorStop(0.5,hsl(215,100,50,charAlpha*0.03));
-            gg.addColorStop(1,'transparent');
-            gCtx.fillStyle=gg;
-            gCtx.fillRect(x+displaceX-glowSize,y+displaceY-glowSize,glowSize*2,glowSize*2);
         }
 
-        // Text shadow layers
-        for(let g=4;g>=0;g--){
-            const ga=charAlpha*(0.03+g*0.015)*(0.6+0.4*Math.sin(t*1.5+i*0.4));
-            ctx.fillStyle=hsl(210,100,60+g*8,ga);
-            ctx.fillText(char,0,0);
-        }
-
-        // Main text
-        ctx.fillStyle=hsl(210,70,92,charAlpha);
-        ctx.fillText(char,0,0);
-
-        // Bright core text
-        ctx.fillStyle=hsl(200,100,98,charAlpha*0.5);
-        ctx.fillText(char,0,0);
-
-        ctx.restore();
-        startX+=charWidths[i];
-    });
-
-    // .com
-    const dotProg=smoothstep(dotComStart,dotComEnd,elapsed);
-    if(dotProg>0){
-        const dp=easeOut(dotProg);
-        ctx.font=`400 ${subFontSize}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
-        ctx.textAlign='center';
-        ctx.textBaseline='middle';
-        const subY=cy+fontSize*0.55;
-        ctx.globalAlpha=dp*0.7;
-        ctx.fillStyle=hsl(210,50,75,dp*0.7);
-        ctx.fillText(subText,cx,subY);
-        ctx.globalAlpha=1;
-
-        // Glow
-        const sg=gCtx.createRadialGradient(cx,subY,0,cx,subY,80);
-        sg.addColorStop(0,hsl(210,100,70,dp*0.05));
-        sg.addColorStop(1,'transparent');
-        gCtx.fillStyle=sg;
-        gCtx.fillRect(cx-80,subY-80,160,160);
-    }
-}
-
-// Idle text with breathing
-function drawIdleText(ctx,gCtx,t){
-    const mainText='robertrothe';
-    const subText='.com';
-    const fontSize=Math.min(W*0.078,85);
-    const subFontSize=Math.min(W*0.028,32);
-    const breathe=0.5+0.5*Math.sin(t*1.2);
-
-    ctx.font=`900 ${fontSize}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
-    ctx.textAlign='center';
-    ctx.textBaseline='middle';
-
-    // Glow layers
-    for(let g=3;g>=0;g--){
-        const ga=0.02*(g+1)*breathe;
-        ctx.fillStyle=hsl(210,100,65+g*8,ga);
-        ctx.fillText(mainText,cx,cy);
-    }
-    ctx.fillStyle=hsl(210,70,92,0.85+breathe*0.15);
-    ctx.fillText(mainText,cx,cy);
-    ctx.fillStyle=hsl(200,100,98,0.3+breathe*0.2);
-    ctx.fillText(mainText,cx,cy);
-
-    // .com
-    const subY=cy+fontSize*0.55;
-    ctx.font=`400 ${subFontSize}px "Helvetica Neue",Helvetica,Arial,sans-serif`;
-    ctx.fillStyle=hsl(210,50,75,0.5+breathe*0.2);
-    ctx.fillText(subText,cx,subY);
-
-    // Center glow
-    const cg=gCtx.createRadialGradient(cx,cy,0,cx,cy,300);
-    cg.addColorStop(0,hsl(210,100,70,(0.08+breathe*0.05)));
-    cg.addColorStop(0.4,hsl(215,100,50,0.02+breathe*0.01));
-    cg.addColorStop(1,'transparent');
-    gCtx.fillStyle=cg;
-    gCtx.fillRect(cx-300,cy-300,600,600);
-}
-
-// ==================== ORBITING MOTES ====================
-function drawOrbitMotes(ctx,gCtx,t,alpha){
-    if(alpha<0.01)return;
-    for(let i=0;i<7;i++){
-        const angle=t*0.25*(i%2?1:-1)+i*Math.PI*2/7;
-        const r=160+i*35+Math.sin(t*0.4+i*1.7)*25;
-        const px=cx+Math.cos(angle)*r;
-        const py=cy+Math.sin(angle)*r*0.35;
-        const sz=1.5+Math.sin(t*2+i*2)*0.8;
-        const ma=alpha*(0.4+0.6*Math.sin(t*1.5+i*1.1));
-
-        // Glow
-        const mg=gCtx.createRadialGradient(px,py,0,px,py,sz*12);
-        mg.addColorStop(0,hsl(200+i*10,100,80,ma*0.25));
-        mg.addColorStop(1,'transparent');
-        gCtx.fillStyle=mg;
-        gCtx.fillRect(px-sz*12,py-sz*12,sz*24,sz*24);
-
-        // Core
-        ctx.beginPath();ctx.arc(px,py,sz,0,Math.PI*2);
-        ctx.fillStyle=hsl(200+i*10,100,90,ma*0.8);
-        ctx.fill();
-
-        // Trail
-        for(let tr=1;tr<8;tr++){
-            const ta=angle-tr*0.06*(i%2?1:-1);
-            const trx=cx+Math.cos(ta)*r;
-            const try_=cy+Math.sin(ta)*r*0.35;
-            const trA=ma*0.15*(1-tr/8);
-            ctx.beginPath();ctx.arc(trx,try_,sz*(1-tr*0.08),0,Math.PI*2);
-            ctx.fillStyle=hsl(200+i*10,100,80,trA);
-            ctx.fill();
-        }
-    }
-}
-
-// ==================== SONY-STYLE "TOWER" WAVE ====================
-function drawTowerWave(ctx,gCtx,t,alpha){
-    if(alpha<0.01)return;
-    const numTowers=60;
-    const spread=W*0.8;
-    const baseY=cy+H*0.25;
-
-    for(let i=0;i<numTowers;i++){
-        const frac=i/numTowers;
-        const x=cx-spread/2+frac*spread;
-        const wave1=Math.sin(frac*Math.PI*4+t*2)*30;
-        const wave2=Math.sin(frac*Math.PI*6-t*1.5)*15;
-        const wave3=Math.sin(frac*Math.PI*2+t*0.8)*20;
-        const h=Math.abs(wave1+wave2+wave3)*alpha;
-        if(h<1)continue;
-
-        const hue=200+frac*40+Math.sin(t+frac*5)*10;
-        const brt=50+Math.sin(frac*10+t*3)*20;
-
-        const tg=ctx.createLinearGradient(x,baseY,x,baseY-h);
-        tg.addColorStop(0,hsl(hue,90,brt*0.5,alpha*0.1));
-        tg.addColorStop(0.5,hsl(hue,100,brt,alpha*0.4));
-        tg.addColorStop(1,hsl(hue,100,brt+20,alpha*0.15));
-        ctx.fillStyle=tg;
-        ctx.fillRect(x-2,baseY-h,4,h);
-
-        // Top glow
-        const tgg=gCtx.createRadialGradient(x,baseY-h,0,x,baseY-h,12);
-        tgg.addColorStop(0,hsl(hue,100,80,alpha*0.15));
-        tgg.addColorStop(1,'transparent');
-        gCtx.fillStyle=tgg;
-        gCtx.fillRect(x-12,baseY-h-12,24,24);
-    }
-}
-
-// ==================== MEMORY CARD SYMBOLS (PS2 easter egg) ====================
-function drawMemorySymbols(ctx,t,alpha){
-    if(alpha<0.01)return;
-    const symbols=['△','○','✕','□'];
-    const size=14;
-    ctx.font=`${size}px "Helvetica Neue",Arial,sans-serif`;
-    ctx.textAlign='center';ctx.textBaseline='middle';
-
-    for(let i=0;i<symbols.length;i++){
-        const angle=t*0.4+i*Math.PI/2;
-        const r=350+Math.sin(t*0.3+i)*20;
-        const x=cx+Math.cos(angle)*r;
-        const y=cy+Math.sin(angle)*r*0.3;
-        const sa=alpha*0.2*(0.3+0.7*Math.sin(t*2+i*1.5));
-        if(sa<0.01)continue;
-        ctx.fillStyle=hsl(210,60,70,sa);
-        ctx.fillText(symbols[i],x,y);
-    }
-}
-
-// ==================== MAIN RENDER LOOP ====================
-const flash=document.getElementById('flash');
-let startTime=performance.now();
-let lastFrame=startTime;
-let impactTriggered=false;
-
-function render(now){
-    const elapsed=(now-startTime)/1000;
-    const dt=Math.min(0.05,(now-lastFrame)/1000);
-    lastFrame=now;
-
-    // Clear
-    ctx.fillStyle='#000';
-    ctx.fillRect(0,0,W,H);
-    gCtx.clearRect(0,0,W,H);
-    pCtx.clearRect(0,0,W,H);
-
-    // Background
-    const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,Math.max(W,H)*0.8);
-    bg.addColorStop(0,hsl(220,50,7,1));
-    bg.addColorStop(0.6,hsl(225,60,3,1));
-    bg.addColorStop(1,hsl(230,70,1,1));
-    ctx.fillStyle=bg;
-    ctx.fillRect(0,0,W,H);
-
-    // === Timeline-based phases ===
-
-    // Stars: fade in 0-2s
-    const starA=smoothstep(0,2,elapsed)*0.7;
-    stars.forEach(s=>s.draw(ctx,elapsed,starA));
-
-    // Grid: 0-3s fade in, 5-7s fade out
-    const gridA=smoothstep(0,2.5,elapsed)*smoothstep(7,5,elapsed)*0.6;
-    drawGrid(ctx,elapsed,gridA,0.5+elapsed*0.1);
-
-    // Tower wave: 1-4.5s
-    const towerA=smoothstep(1,2,elapsed)*smoothstep(5.5,4,elapsed);
-    drawTowerWave(ctx,gCtx,elapsed,towerA);
-
-    // Pillars: 0.5-6s
-    const pillarA=smoothstep(0.5,2,elapsed)*smoothstep(7,5,elapsed);
-    if(pillarA>0.01){
-        pillars.sort((a,b)=>b.z-a.z);
-        pillars.forEach(p=>{
-            p.update(dt*(0.5+pillarA*1.5));
-            p.draw(ctx,gCtx,elapsed,pillarA);
+        // --- Back Buttons Behavior ---
+        document.querySelectorAll('.btn-back').forEach(btn => {
+            btn.addEventListener('click', () => {
+                resetState();
+                switchView('home');
+            });
         });
-    }
 
-    // Dust particles always
-    const dustA=smoothstep(0,3,elapsed);
-    dust.forEach(p=>{p.update(dt);p.draw(ctx,dustA);});
-
-    // Light beams: 3-7s
-    const beamA=smoothstep(3,4,elapsed)*smoothstep(8,6.5,elapsed);
-    drawBeams(gCtx,elapsed,beamA);
-
-    // Convergence streams: 3.5-5.5s
-    if(elapsed>3.5&&!streamsSpawned){
-        streamsSpawned=true;
-        for(let i=0;i<60;i++)streamParticles.push(new StreamParticle());
-    }
-    if(streamsSpawned&&elapsed<7){
-        streamParticles.forEach(p=>{p.update(dt);p.draw(pCtx);});
-    }
-
-    // Rings: 3.5-7s
-    const ringA=smoothstep(3.5,4.5,elapsed)*smoothstep(7.5,6.5,elapsed);
-    drawRings(gCtx,elapsed,ringA);
-
-    // Memory symbols: 4-6s
-    const memA=smoothstep(4,4.5,elapsed)*smoothstep(7,6,elapsed);
-    drawMemorySymbols(ctx,elapsed,memA);
-
-    // Flash + text impact at 5s
-    if(elapsed>5&&!impactTriggered){
-        impactTriggered=true;
-        flash.style.transition='none';
-        flash.style.opacity='0.5';
-        requestAnimationFrame(()=>{
-            flash.style.transition='opacity 2s cubic-bezier(0.2,0,0,1)';
-            flash.style.opacity='0';
-        });
-    }
-
-    // Text: 5-7.5s reveal
-    if(elapsed>=4.5&&elapsed<8.5){
-        drawTextSequence(ctx,gCtx,elapsed,elapsed);
-    }
-
-    // Lens flare: 5-8s
-    const flareA=smoothstep(5,5.5,elapsed)*smoothstep(9,7,elapsed);
-    if(flareA>0){
-        const flareI=Math.sin(clamp((elapsed-5)/3,0,1)*Math.PI)*flareA;
-        drawFlare(gCtx,cx,cy,flareI,elapsed);
-    }
-
-    // === IDLE STATE (after 8s) ===
-    if(elapsed>8){
-        const idleA=smoothstep(8,9.5,elapsed);
-        drawIdleText(ctx,gCtx,elapsed);
-        drawOrbitMotes(ctx,gCtx,elapsed,idleA);
-
-        // Soft persistent rings
-        for(let i=0;i<3;i++){
-            const r=200+i*80+Math.sin(elapsed*0.5+i)*15;
-            const ra=idleA*0.03*(0.3+0.7*Math.sin(elapsed*0.7+i*1.2));
-            if(ra<0.003)continue;
-            gCtx.beginPath();gCtx.arc(cx,cy,r,0,Math.PI*2);
-            gCtx.strokeStyle=hsl(210,100,60,ra);
-            gCtx.lineWidth=0.8;gCtx.stroke();
+        function resetState() {
+            if (connection) {
+                connection.close();
+            }
+            if (peer) {
+                peer.destroy();
+                peer = null;
+            }
+            if (speedInterval) {
+                clearInterval(speedInterval);
+            }
+            activeFile = null;
+            receivedChunks = [];
+            expectedFileSize = 0;
+            receivedBytes = 0;
+            connectionIndicator.classList.add('hidden');
+            document.getElementById('selected-file-info').classList.add('hidden');
+            document.getElementById('file-input').value = '';
+            window.location.hash = '';
+            setStatus('Ready');
         }
 
-        // Subtle ambient grid
-        drawGrid(ctx,elapsed,idleA*0.08,0.2);
-    }
+        // --- View: Home Trigger Actions ---
+        document.getElementById('btn-choose-send').addEventListener('click', () => {
+            switchView('sendSelect');
+        });
 
-    requestAnimationFrame(render);
-}
+        document.getElementById('btn-choose-receive').addEventListener('click', () => {
+            switchView('receiveSetup');
+        });
 
-requestAnimationFrame(render);
+        // --- View: Send Select Logic ---
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
 
-})();
-</script>
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.add('drag-over');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                handleFileSelection(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelection(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelection(file) {
+            activeFile = file;
+            document.getElementById('info-file-name').textContent = file.name;
+            document.getElementById('info-file-size').textContent = formatBytes(file.size);
+            document.getElementById('selected-file-info').classList.remove('hidden');
+        }
+
+        document.getElementById('btn-start-share').addEventListener('click', () => {
+            if (!activeFile) return;
+            initializeSenderPeer();
+        });
+
+        // --- PeerJS Init Sender ---
+        function initializeSenderPeer() {
+            setStatus('Initializing network...');
+            peer = new Peer({
+                debug: 1
+            });
+
+            peer.on('open', (id) => {
+                setStatus('Awaiting recipient...');
+                switchView('sendShare');
+                
+                // Construct Share URL
+                const shareUrl = `${window.location.origin}${window.location.pathname}#${id}`;
+                document.getElementById('share-url-input').value = shareUrl;
+
+                // Create QR code
+                new QRious({
+                    element: document.getElementById('qr-canvas'),
+                    value: shareUrl,
+                    size: 200,
+                    background: '#ffffff',
+                    foreground: '#0f172a',
+                    level: 'H'
+                });
+            });
+
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupSenderConnection();
+            });
+
+            peer.on('error', (err) => {
+                setStatus(`Network error: ${err.type}`);
+            });
+        }
+
+        function setupSenderConnection() {
+            connectionIndicator.classList.remove('hidden');
+            setStatus('Connected');
+            
+            connection.on('open', () => {
+                startFileTransfer();
+            });
+
+            connection.on('close', () => {
+                setStatus('Disconnected');
+                connectionIndicator.classList.add('hidden');
+            });
+        }
+
+        // --- Sender Transfer Execution ---
+        async function startFileTransfer() {
+            switchView('transfer');
+            document.getElementById('transfer-status-title').textContent = 'Sending File';
+            document.getElementById('transfer-file-name').textContent = activeFile.name;
+
+            // Notify metadata
+            connection.send(JSON.stringify({
+                type: 'metadata',
+                name: activeFile.name,
+                size: activeFile.size,
+                mime: activeFile.type
+            }));
+
+            let offset = 0;
+            const reader = new FileReader();
+            transferStartTime = Date.now();
+            lastLoggedBytes = 0;
+
+            startSpeedTracker(() => offset, activeFile.size);
+
+            const readNextSlice = () => {
+                const slice = activeFile.slice(offset, offset + CHUNK_SIZE);
+                reader.readAsArrayBuffer(slice);
+            };
+
+            reader.onload = async (event) => {
+                const buffer = event.target.result;
+                
+                // Backpressure implementation: Check buffered amount on data channel
+                if (connection.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+                    await new Promise(resolve => {
+                        const checkBuffer = setInterval(() => {
+                            if (connection.bufferedAmount < MAX_BUFFERED_AMOUNT / 2) {
+                                clearInterval(checkBuffer);
+                                resolve();
+                            }
+                        }, 50);
+                    });
+                }
+
+                connection.send(buffer);
+                offset += buffer.byteLength;
+                updateProgressBar(offset, activeFile.size);
+
+                if (offset < activeFile.size) {
+                    readNextSlice();
+                } else {
+                    connection.send(JSON.stringify({ type: 'eof' }));
+                    clearInterval(speedInterval);
+                    setStatus('Finished sending');
+                    document.getElementById('transfer-status-title').textContent = 'File Sent Successfully';
+                }
+            };
+
+            readNextSlice();
+        }
+
+        // --- PeerJS Init Receiver ---
+        document.getElementById('btn-connect-manual').addEventListener('click', () => {
+            const peerId = document.getElementById('input-peer-id').value.trim();
+            if (peerId) {
+                initializeReceiverPeer(peerId);
+            }
+        });
+
+        function initializeReceiverPeer(targetPeerId) {
+            setStatus('Connecting to sender...');
+            peer = new Peer({ debug: 1 });
+
+            peer.on('open', () => {
+                connection = peer.connect(targetPeerId);
+                setupReceiverConnection();
+            });
+
+            peer.on('error', (err) => {
+                setStatus(`Network error: ${err.type}`);
+            });
+        }
+
+        function setupReceiverConnection() {
+            connection.on('open', () => {
+                connectionIndicator.classList.remove('hidden');
+                setStatus('Connected to peer');
+                switchView('transfer');
+                document.getElementById('transfer-status-title').textContent = 'Waiting for file info...';
+                transferStartTime = Date.now();
+                lastLoggedBytes = 0;
+            });
+
+            connection.on('data', (data) => {
+                if (typeof data === 'string') {
+                    try {
+                        const message = JSON.parse(data);
+                        if (message.type === 'metadata') {
+                            // File Meta Ready
+                            expectedFileSize = message.size;
+                            mimeType = message.mime || 'application/octet-stream';
+                            document.getElementById('transfer-file-name').textContent = message.name;
+                            document.getElementById('transfer-status-title').textContent = 'Receiving File';
+                            receivedChunks = [];
+                            receivedBytes = 0;
+                            startSpeedTracker(() => receivedBytes, expectedFileSize);
+                        } else if (message.type === 'eof') {
+                            // File Complete
+                            clearInterval(speedInterval);
+                            const finalBlob = new Blob(receivedChunks, { type: mimeType });
+                            triggerDownload(finalBlob, document.getElementById('transfer-file-name').textContent);
+                            document.getElementById('transfer-status-title').textContent = 'File Received Successfully';
+                            setStatus('Download ready');
+                        }
+                    } catch (e) {
+                        console.error("Meta parse error:", e);
+                    }
+                } else {
+                    // Binary Chunk Received
+                    receivedChunks.push(data);
+                    receivedBytes += data.byteLength;
+                    updateProgressBar(receivedBytes, expectedFileSize);
+                }
+            });
+
+            connection.on('close', () => {
+                setStatus('Disconnected');
+                connectionIndicator.classList.add('hidden');
+                clearInterval(speedInterval);
+            });
+        }
+
+        // --- Helper: Speed and Visuals Tracking ---
+        function updateProgressBar(current, total) {
+            const percent = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+            document.getElementById('transfer-progress-bar').style.width = `${percent}%`;
+            document.getElementById('transfer-progress-percent').textContent = `${percent}%`;
+            document.getElementById('transfer-details').textContent = `${formatBytes(current)} / ${formatBytes(total)}`;
+        }
+
+        function startSpeedTracker(getProgressBytes, totalBytes) {
+            if (speedInterval) clearInterval(speedInterval);
+            transferStartTime = Date.now();
+            lastLoggedBytes = 0;
+
+            speedInterval = setInterval(() => {
+                const currentBytes = getProgressBytes();
+                const bytesInPeriod = currentBytes - lastLoggedBytes;
+                lastLoggedBytes = currentBytes;
+
+                const speed = bytesInPeriod; // bytes/sec (since ran every 1000ms)
+                document.getElementById('transfer-speed').textContent = `${formatBytes(speed)}/s`;
+
+                // ETA calculation
+                if (speed > 0) {
+                    const remainingBytes = totalBytes - currentBytes;
+                    const etaSeconds = Math.round(remainingBytes / speed);
+                    document.getElementById('transfer-time').textContent = `ETA: ${formatTime(etaSeconds)}`;
+                } else {
+                    document.getElementById('transfer-time').textContent = `ETA: Calculating...`;
+                }
+            }, 1000);
+        }
+
+        // --- Camera QR Code Scanning Logic ---
+        const btnStartScanner = document.getElementById('btn-start-scanner');
+        const btnStopScanner = document.getElementById('btn-stop-scanner');
+        const scannerContainer = document.getElementById('scanner-container');
+        const receiveOptions = document.getElementById('receive-options');
+
+        btnStartScanner.addEventListener('click', async () => {
+            scannerContainer.classList.remove('hidden');
+            receiveOptions.classList.add('hidden');
+            
+            html5QrCode = new Html5Qrcode("qr-reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+            try {
+                await html5QrCode.start(
+                    { facingMode: "environment" }, 
+                    config, 
+                    (decodedText) => {
+                        stopScanner();
+                        // Parse target ID from url
+                        const hashIndex = decodedText.indexOf('#');
+                        if (hashIndex !== -1) {
+                            const targetId = decodedText.substring(hashIndex + 1);
+                            initializeReceiverPeer(targetId);
+                        }
+                    }
+                );
+            } catch (err) {
+                setStatus("Camera access failed.");
+                stopScanner();
+            }
+        });
+
+        btnStopScanner.addEventListener('click', stopScanner);
+
+        function stopScanner() {
+            if (html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    html5QrCode.clear();
+                    html5QrCode = null;
+                }).catch(err => console.error(err));
+            }
+            scannerContainer.classList.add('hidden');
+            receiveOptions.classList.remove('hidden');
+        }
+
+        // --- Generic Helpers ---
+        function triggerDownload(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatTime(seconds) {
+            if (seconds === Infinity || isNaN(seconds)) return "estimating";
+            if (seconds < 60) return `${seconds}s`;
+            const minutes = Math.floor(seconds / 60);
+            return `${minutes}m ${seconds % 60}s`;
+        }
+
+        // URL Clipboard Copy Logic
+        document.getElementById('btn-copy-link').addEventListener('click', () => {
+            const copyText = document.getElementById('share-url-input');
+            copyText.select();
+            copyText.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(copyText.value)
+                .then(() => setStatus('Link copied to clipboard'))
+                .catch(() => setStatus('Copy failed'));
+        });
+
+        // Auto-connect if URL Hash present
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.location.hash) {
+                const targetId = window.location.hash.substring(1);
+                switchView('receiveSetup');
+                initializeReceiverPeer(targetId);
+            }
+        });
+    </script>
 </body>
 </html>
