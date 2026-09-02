@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>lol</title>
+    <title>Geo-Rater Pro</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <style>
         :root {
             /* Farben invertiert: dunkles Design -> helles Design */
@@ -116,24 +118,22 @@
         #next-round-button, .mode-button-static { background: linear-gradient(45deg, var(--accent-green), var(--accent-green-dark)); }
         #next-round-button:hover:not(:disabled), .mode-button-static:hover { transform: translateY(-2px); box-shadow: 0 7px 10px rgba(15, 23, 42, 0.15); }
         button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-        /* --- Google-Popup & Text-Overlays ausblenden --- */
+        /* --- Google-Overlays im Street-View-Panorama ausblenden --- */
         /* Fehlerdialog ("Google Maps kann... nicht geladen werden") */
         #pano div[style*="background-color: white"],
-        #map div[style*="background-color: white"],
         div[style*="z-index: 10000000"],
         button.dismissButton,
         /* Wasserzeichen "For development purposes only" im Panorama */
         #pano div[style*="background-color: rgba(0, 0, 0, 0.3)"][style*="font-size: 20px"],
-        /* Google-Logo unten links (Pano + 2D-Karte) */
+        /* Google-Logo unten links */
         #pano [style*="z-index: 1000000"][style*="bottom: 0px"],
-        #map [style*="z-index: 1000000"][style*="bottom: 0px"],
-        #map div[style*="margin: 0px 5px"],
         /* Untere Leiste: Kurzbefehle / © Google / Nutzungsbedingungen */
         #pano [style*="display: inline-flex"][style*="right: 0px"][style*="bottom: 0px"],
-        .gm-style-cc, .gmnoprint, .gmnoscreen,
-        img[src*="google_gray"], img[src*="google_white"] {
+        #pano img[src*="google_gray"], #pano img[src*="google_white"] {
             display: none !important;
         }
+        /* OSM-Attribution dezenter */
+        .leaflet-container .leaflet-control-attribution { font-size: 9px; background: rgba(255,255,255,0.6); }
 
         .pano-loading-message { color: var(--text-primary); font-size: 1.5rem; text-align: center; padding: 2rem; }
     </style>
@@ -185,15 +185,21 @@
 
         function initGame() {
             // KARTE IST JETZT WIEDER FARBIG (styles-Attribut entfernt)
-            const mapOptions = { center: { lat: 20, lng: 0 }, zoom: 2, streetViewControl: false, mapTypeControl: false, fullscreenControl: false };
-            map = new google.maps.Map(mapElement, mapOptions);
+            // 2D-Karte: OpenStreetMap via Leaflet – kein API-Key noetig, keine Wasserzeichen
+            map = L.map('map', { center: [20, 0], zoom: 2, minZoom: 1, maxZoom: 18, worldCopyJump: true, zoomControl: false });
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 18,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
+            }).addTo(map);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
             streetViewService = new google.maps.StreetViewService();
             
             document.querySelectorAll('.mode-selection button').forEach(button => {
                 button.addEventListener('click', () => selectGameModeAndStart(button.dataset.mode));
             });
             
-            map.addListener('click', handleMapClick);
+            map.on('click', handleMapClick);
             toggleMapButton.addEventListener('click', toggleMap);
             confirmGuessButton.addEventListener('click', processGuess);
             nextRoundButton.addEventListener('click', () => {
@@ -213,7 +219,7 @@
         function toggleMap() {
             const isOpen = mapContainer.classList.toggle('is-open');
             toggleMapButton.innerText = isOpen ? 'Karte schließen' : 'Karte öffnen';
-            if (isOpen) { google.maps.event.trigger(map, 'resize'); map.setCenter({ lat: 20, lng: 0 }); map.setZoom(2); }
+            if (isOpen) { map.invalidateSize(); map.setView([20, 0], 2); }
         }
 
         async function startNewRound() {
@@ -250,7 +256,9 @@
                     const lat = Math.random() * 170 - 85; const lng = Math.random() * 360 - 180;
                     try {
                         const { data } = await streetViewService.getPanorama({ location: { lat, lng }, radius: 100000, preference: google.maps.StreetViewPreference.NEAREST, source: google.maps.StreetViewSource.OUTDOOR });
-                        resolve(data.location.latLng); return; 
+                        const ll = data.location.latLng;
+                        resolve({ lat: ll.lat(), lng: ll.lng() });
+                        return; 
                     } catch (e) {
                          if (e && e.code === 'ZERO_RESULTS') { continue; } else { reject(e); return; }
                     }
@@ -259,19 +267,20 @@
             });
         }
 
-        function handleMapClick(event) { 
-            if (nextRoundButton.disabled === false) return; 
-            if (guessMarker) { guessMarker.setPosition(event.latLng); } 
-            else { guessMarker = new google.maps.Marker({ position: event.latLng, map: map, animation: google.maps.Animation.DROP }); }
+        function handleMapClick(event) {
+            if (nextRoundButton.disabled === false) return;
+            const latlng = event.latlng;
+            if (guessMarker) { guessMarker.setLatLng(latlng); }
+            else { guessMarker = L.marker([latlng.lat, latlng.lng]).addTo(map); }
             confirmGuessButton.classList.add('visible');
         }
 
         function processGuess() {
             if (!guessMarker) return;
-            const guessPosition = guessMarker.getPosition();
-            guessMarker.setAnimation(null);
+            const guessPosition = guessMarker.getLatLng();
             
-            const distanceInMeters = google.maps.geometry.spherical.computeDistanceBetween(guessPosition, currentLocation);
+            
+            const distanceInMeters = haversineMeters(guessPosition, currentLocation);
             const distanceInKm = distanceInMeters / 1000;
             const score = calculateScore(distanceInKm);
             totalScore += score;
@@ -288,6 +297,16 @@
             showResultOnMap(guessPosition);
         }
 
+        // Luftlinien-Distanz in Metern (Haversine-Formel, ~0.5% Genauigkeit)
+        function haversineMeters(a, b) {
+            const R = 6371000;
+            const toRad = d => d * Math.PI / 180;
+            const dLat = toRad(b.lat - a.lat);
+            const dLng = toRad(b.lng - a.lng);
+            const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(h));
+        }
+
         function calculateScore(distanceKm) {
             if (distanceKm < 0.05) return 5000;
             const score = Math.round(5000 * Math.exp(-distanceKm / 1500));
@@ -295,22 +314,24 @@
         }
 
         function showResultOnMap(guessPosition) {
-            actualMarker = new google.maps.Marker({ position: currentLocation, map: map, icon: {
-                url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><circle cx="9" cy="9" r="7" fill="#16a34a" stroke="#ffffff" stroke-width="2"/></svg>'),
-                size: new google.maps.Size(18, 18),
-                anchor: new google.maps.Point(9, 9)
-            } });
-            resultLine = new google.maps.Polyline({ path: [guessPosition, currentLocation], geodesic: true, strokeColor: '#FF0000', strokeOpacity: 0.8, strokeWeight: 2, map: map });
-            const bounds = new google.maps.LatLngBounds();
-            bounds.extend(guessPosition);
-            bounds.extend(currentLocation);
-            map.fitBounds(bounds, {padding: 50});
+            // Tatsächlicher Ort (grüner Punkt) + Verbindungslinie
+            actualMarker = L.circleMarker([currentLocation.lat, currentLocation.lng], {
+                radius: 7, color: '#ffffff', weight: 2, fillColor: '#16a34a', fillOpacity: 1
+            }).addTo(map);
+            resultLine = L.polyline([
+                [guessPosition.lat, guessPosition.lng],
+                [currentLocation.lat, currentLocation.lng]
+            ], { color: '#FF0000', weight: 3, opacity: 0.8 }).addTo(map);
+            map.fitBounds(L.latLngBounds([
+                [guessPosition.lat, guessPosition.lng],
+                [currentLocation.lat, currentLocation.lng]
+            ]).pad(0.3));
         }
 
         function resetRoundUI() {
-            if (guessMarker) guessMarker.setMap(null);
-            if (actualMarker) actualMarker.setMap(null);
-            if (resultLine) resultLine.setMap(null);
+            if (guessMarker) guessMarker.remove();
+            if (actualMarker) actualMarker.remove();
+            if (resultLine) resultLine.remove();
             guessMarker = actualMarker = resultLine = null;
             document.getElementById('round-score').innerText = '0';
             document.getElementById('distance').innerText = '---';
